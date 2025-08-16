@@ -1,7 +1,10 @@
 import { useEffect } from "react"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useForm } from "react-hook-form"
+import { useTranslation } from "react-i18next"
+import { useLocation } from "react-router-dom"
 
+import { isDesktopMode } from "@/lib/env"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -35,17 +38,18 @@ export function AIConfigForm() {
   })
   const { reset } = form
   const { testModel } = useModelTest()
+  const { t } = useTranslation()
+  const location = useLocation()
 
   useEffect(() => {
     reset(aiConfig)
   }, [aiConfig, reset])
 
   function onSubmit(data: AIFormValues) {
-    console.log(data)
     setAiConfig(data)
     // data.token = "sk-**********"
     toast({
-      title: "AI Config updated.",
+      title: t("settings.ai.configUpdated"),
     })
   }
   function updateModels(models: string[]) {
@@ -60,18 +64,24 @@ export function AIConfigForm() {
     onSubmit(form.getValues())
   }
 
+  const getCardClassName = (cardId: string) => {
+    return location.hash === `#${cardId}` ? "ring" : ""
+  }
+
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <LocalLLMManage
-          models={form.getValues("localModels")}
-          setModels={updateModels}
-        />
-        <Card>
+        {!isDesktopMode && (
+          <LocalLLMManage
+            models={form.getValues("localModels")}
+            setModels={updateModels}
+          />
+        )}
+        <Card id="provider" className={getCardClassName("provider")}>
           <CardHeader>
-            <CardTitle>Provider</CardTitle>
+            <CardTitle>{t("settings.ai.provider")}</CardTitle>
             <CardDescription>
-              There are many LLM API providers. configure as your need.
+              {t("settings.ai.providerDescription")}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -89,11 +99,14 @@ export function AIConfigForm() {
             />
           </CardContent>
         </Card>
-        <Card>
+        <Card
+          id="model-preferences"
+          className={getCardClassName("model-preferences")}
+        >
           <CardHeader>
-            <CardTitle>Model Preferences</CardTitle>
+            <CardTitle>{t("settings.ai.modelPreferences")}</CardTitle>
             <CardDescription>
-              Select preferred models for different tasks
+              {t("settings.ai.modelPreferencesDescription")}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -103,7 +116,9 @@ export function AIConfigForm() {
               render={({ field }) => (
                 <FormItem>
                   <div className="flex justify-between items-center">
-                    <FormLabel className="w-1/3">Embedding Model</FormLabel>
+                    <FormLabel className="w-1/3">
+                      {t("settings.ai.embeddingModel")}
+                    </FormLabel>
                     <div className="w-2/3 flex space-x-2">
                       <FormControl className="flex-grow">
                         <AIModelSelect
@@ -119,12 +134,12 @@ export function AIConfigForm() {
                           testModel(TaskType.Embedding, field.value)
                         }
                       >
-                        Test
+                        {t("common.test")}
                       </Button>
                     </div>
                   </div>
                   <FormDescription>
-                    Select your preferred model for embedding tasks
+                    {t("settings.ai.embeddingModelDescription")}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -136,7 +151,9 @@ export function AIConfigForm() {
               render={({ field }) => (
                 <FormItem>
                   <div className="flex justify-between items-center">
-                    <FormLabel className="w-1/3">Translation Model</FormLabel>
+                    <FormLabel className="w-1/3">
+                      {t("settings.ai.translationModel")}
+                    </FormLabel>
                     <div className="w-2/3 flex space-x-2">
                       <FormControl className="flex-grow">
                         <AIModelSelect
@@ -153,12 +170,12 @@ export function AIConfigForm() {
                           testModel(TaskType.Translation, field.value)
                         }
                       >
-                        Test
+                        {t("common.test")}
                       </Button>
                     </div>
                   </div>
                   <FormDescription>
-                    Select your preferred model for translation tasks
+                    {t("settings.ai.translationModelDescription")}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -170,7 +187,9 @@ export function AIConfigForm() {
               render={({ field }) => (
                 <FormItem>
                   <div className="flex justify-between items-center">
-                    <FormLabel className="w-1/3">Coding Model</FormLabel>
+                    <FormLabel className="w-1/3">
+                      {t("settings.ai.codingModel")}
+                    </FormLabel>
                     <div className="w-2/3 flex space-x-2">
                       <FormControl className="flex-grow">
                         <AIModelSelect
@@ -183,16 +202,14 @@ export function AIConfigForm() {
                       <Button
                         type="button"
                         variant="outline"
-                        onClick={() =>
-                          testModel(TaskType.Coding, field.value)
-                        }
+                        onClick={() => testModel(TaskType.Coding, field.value)}
                       >
-                        Test
+                        {t("common.test")}
                       </Button>
                     </div>
                   </div>
                   <FormDescription>
-                    Select your preferred model for coding tasks
+                    {t("settings.ai.codingModelDescription")}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -200,37 +217,7 @@ export function AIConfigForm() {
             />
           </CardContent>
         </Card>
-        {/* <Card>
-          <CardHeader>
-            <CardTitle>Runtime</CardTitle>
-            <CardDescription></CardDescription>
-          </CardHeader>
-          <CardContent>
-            <FormField
-              control={form.control}
-              name="autoLoadEmbeddingModel"
-              render={({ field }) => (
-                <FormItem className="flex flex-col">
-                  <FormLabel>Auto Load Embedding Model</FormLabel>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    ></Switch>
-                  </FormControl>
-                  <FormDescription>
-                    The embedding model is automatically loaded when the app
-                    starts. It will warm up the embedding model in the worker,
-                    which will make the first search faster. This may increase
-                    memory usage.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </CardContent>
-        </Card> */}
-        <Button type="submit">Update</Button>
+        <Button type="submit">{t("common.update")}</Button>
       </form>
     </Form>
   )

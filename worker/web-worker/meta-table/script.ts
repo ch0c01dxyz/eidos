@@ -1,4 +1,4 @@
-import { JsonSchema7ObjectType } from "zod-to-json-schema/src/parsers/object"
+import { JsonSchema7ObjectType } from "zod-to-json-schema"
 
 import { ScriptTableName } from "@/lib/sqlite/const"
 
@@ -19,10 +19,14 @@ export interface IPromptConfig {
   actions?: string[]
 }
 
+
+// aka extension
 export interface IScript {
   id: string
   name: string
-  type: "script" | "udf" | "prompt" | "block" | "app"
+  // block is static code stored in local file system
+  // m_block is mini or macro block, just a piece of code snippet stored in database
+  type: "script" | "udf" | "prompt" | "block" | "app" | "m_block" | "doc_plugin" | "py_script"
   description: string
   version: string
   code: string
@@ -57,6 +61,13 @@ export interface IScript {
       }
     }
   }
+  // FIXME: there are too many fields in this table, we need to refactor it
+  bindings?: Record<string, {
+    type: 'table'
+    value: string
+  }>
+  // for py_script
+  dependencies?: string[]
 }
 
 export class ScriptTable
@@ -81,6 +92,8 @@ export class ScriptTable
         env_map TEXT,
         fields_map TEXT,
         enabled BOOLEAN DEFAULT 0,
+        bindings TEXT,
+        dependencies TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
@@ -93,11 +106,17 @@ export class ScriptTable
     "env_map",
     "fields_map",
     "prompt_config",
+    "bindings",
+    "dependencies",
   ]
 
-  del(id: string): Promise<boolean> {
-    this.dataSpace.exec2(`DELETE FROM ${this.name} WHERE id = ?`, [id])
-    return Promise.resolve(true)
+  async del(id: string): Promise<boolean> {
+    await this.dataSpace.db.transaction(async () => {
+      await this.dataSpace.exec2(`DELETE FROM ${this.name} WHERE id = ?`, [id])
+      const chatIds = await this.dataSpace.chat.getChatIdsByProjectId(id)
+      await Promise.all(chatIds.map(chatId => this.dataSpace.chat.delete(chatId)))
+    })
+    return true
   }
 
   async enable(id: string): Promise<boolean> {

@@ -1,6 +1,9 @@
-import { useState } from "react"
+import { useContext, useState, useEffect } from "react"
 import { LayoutGridIcon, LayoutListIcon, Table2Icon } from "lucide-react"
 import ReactDOM from "react-dom"
+import { useTranslation } from "react-i18next"
+import { useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 import { IView, ViewTypeEnum } from "@/lib/store/IView"
 import { cn } from "@/lib/utils"
@@ -22,6 +25,7 @@ import {
 
 import { Button } from "../ui/button"
 import { TABLE_CONTENT_ELEMENT_ID } from "./helper"
+import { TableContext } from "./hooks"
 import { useViewLoadingStore } from "./hooks/use-view-loading"
 import { ViewEditor } from "./view-editor/view-editor"
 
@@ -46,75 +50,139 @@ export const ViewItem = ({
   deleteView,
   disabledDelete,
 }: IViewItemProps) => {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const { getLoading } = useViewLoadingStore()
   const loading = getLoading(view.query)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const { isReadOnly } = useContext(TableContext)
+
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({
+    id: view.id,
+    animateLayoutChanges: () => false,
+  })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
 
   const Icon = ViewIconMap[view.type]
+  
   const handleOpen = () => {
-    if (isActive) {
+    if (isActive && !isReadOnly) {
       setOpen(!open)
     }
   }
 
   const handleEdit = () => {
-    setEditDialogOpen(true)
-    setOpen(false)
+    if (!isReadOnly) {
+      setEditDialogOpen(true)
+      setOpen(false)
+    }
   }
 
   return (
     <>
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DropdownMenu onOpenChange={handleOpen} open={open}>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              onClick={() => jump2View(view.id)}
-              size="sm"
-              className={cn({
-                "opacity-60": !isActive,
-                "border-b-2 border-primary  rounded-b-none": isActive,
-                "animate-border-flicker": loading,
-              })}
-            >
-              <div className="flex items-center gap-1">
-                <Icon className="h-4 w-4" />
-                <span className="select-none">{view.name}</span>
-              </div>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuItem onSelect={handleEdit}>Edit</DropdownMenuItem>
-            <DropdownMenuItem disabled={disabledDelete}>
-              <DialogTrigger className="flex w-full cursor-default">
-                Delete
-              </DialogTrigger>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Are you sure delete this view?</DialogTitle>
-            <DialogDescription>
-              This action cannot be undone. This will permanently delete the
-              view
-            </DialogDescription>
-            <DialogFooter>
-              <Button
-                variant="secondary"
-                onClick={() => setDeleteDialogOpen(false)}
+      {!isReadOnly ? (
+        <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <DropdownMenu onOpenChange={handleOpen} open={open}>
+            <DropdownMenuTrigger asChild>
+              <div
+                ref={setNodeRef}
+                style={style}
+                className="flex items-center"
               >
-                Cancel
-              </Button>
-              <Button variant="destructive" onClick={deleteView}>
-                Delete
-              </Button>
-            </DialogFooter>
-          </DialogHeader>
-        </DialogContent>
-      </Dialog>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => jump2View(view.id)}
+                  className={cn({
+                    "opacity-60": !isActive,
+                    "border-b-2 border-primary rounded-b-none": isActive,
+                    "animate-border-flicker": loading,
+                  })}
+                >
+                  <div className="flex items-center gap-1">
+                    <div
+                      {...attributes}
+                      {...listeners}
+                      className="flex items-center"
+                    >
+                      <Icon className="h-4 w-4 cursor-grab active:cursor-grabbing" />
+                    </div>
+                    <span className="select-none">{view.name}</span>
+                  </div>
+                </Button>
+              </div>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onSelect={handleEdit} disabled={isReadOnly}>
+                {t('table.view.edit')}
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={disabledDelete || isReadOnly}>
+                <DialogTrigger className="flex w-full cursor-default">
+                  {t('common.delete')}
+                </DialogTrigger>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t('table.view.deleteConfirmTitle')}</DialogTitle>
+              <DialogDescription>
+                {t('table.view.deleteConfirmDescription')}
+              </DialogDescription>
+              <DialogFooter>
+                <Button
+                  variant="secondary"
+                  onClick={() => setDeleteDialogOpen(false)}
+                >
+                  {t('common.cancel')}
+                </Button>
+                <Button variant="destructive" onClick={deleteView}>
+                  {t('common.delete')}
+                </Button>
+              </DialogFooter>
+            </DialogHeader>
+          </DialogContent>
+        </Dialog>
+      ) : (
+        <div
+          ref={setNodeRef}
+          style={style}
+          className="flex items-center"
+        >
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => jump2View(view.id)}
+            className={cn({
+              "opacity-60": !isActive,
+              "border-b-2 border-primary rounded-b-none": isActive,
+              "animate-border-flicker": loading,
+            })}
+          >
+            <div className="flex items-center gap-1">
+              <div
+                {...attributes}
+                {...listeners}
+                className="flex items-center"
+              >
+                <Icon className="h-4 w-4 cursor-grab active:cursor-grabbing" />
+              </div>
+              <span className="select-none">{view.name}</span>
+            </div>
+          </Button>
+        </div>
+      )}
       {editDialogOpen &&
         ReactDOM.createPortal(
           <ViewEditor setEditDialogOpen={setEditDialogOpen} view={view} />,

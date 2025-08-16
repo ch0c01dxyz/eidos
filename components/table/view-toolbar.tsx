@@ -6,7 +6,22 @@ import {
   useRef,
   useState,
 } from "react"
+import {
+  DndContext,
+  DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core"
+import {
+  SortableContext,
+  arrayMove,
+  horizontalListSortingStrategy,
+} from "@dnd-kit/sortable"
 import { ChevronDownIcon, PlusIcon } from "lucide-react"
+import { useTranslation } from "react-i18next"
 import {
   createSearchParams,
   useLocation,
@@ -19,7 +34,6 @@ import { cn, getTableIdByRawTableName, shortenId, uuidv7 } from "@/lib/utils"
 import { useCurrentSubPage } from "@/hooks/use-current-sub-page"
 import { useSqlite } from "@/hooks/use-sqlite"
 import { useTableOperation } from "@/hooks/use-table"
-import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,6 +41,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Dialog,
+  DialogContent,
+  DialogTrigger,
+} from "@/components/ui/sub-page-dialog"
 import { NodeComponent } from "@/apps/web-app/[database]/[node]/page"
 
 import { Button } from "../ui/button"
@@ -36,48 +55,42 @@ import { ViewFilter } from "./view-filter"
 import { ViewItem } from "./view-item"
 import { ViewSort } from "./view-sort"
 
-const useGap = (
-  width: number | undefined,
-  el1?: HTMLElement | null,
-  el2?: HTMLElement | null
-) => {
-  const [gap, setGap] = useState(0)
-  const [breakpoint, setBreakpoint] = useState<number | null>(null)
-  useEffect(() => {
-    if (el1 && el2) {
-      const rect1 = el1.getBoundingClientRect()
-      const rect2 = el2.getBoundingClientRect()
-      let distance = rect2.left - (rect1.left + rect1.width)
-      if (distance < 50 && !breakpoint) {
-        setBreakpoint(width!)
-      }
-      setGap(distance)
-    }
-  }, [breakpoint, el1, el2, width])
-  const display = useMemo(() => {
-    if (!breakpoint) return "lg"
-    return (width ?? 0) < (breakpoint ?? 0) ? "sm" : "lg"
-  }, [width, breakpoint])
-  return {
-    gap,
-    display,
-    breakpoint,
-  }
-}
-
 const Views = ({
   views,
   currentView,
   jump2View,
   deleteView,
   asList,
+  onReorder,
 }: {
   views: IView[]
   currentView: IView | undefined
   jump2View: (viewId: string) => void
   deleteView: (viewId: string) => () => void
   asList?: boolean
+  onReorder?: (
+    dragId: string,
+    targetId: string,
+    direction: "up" | "down"
+  ) => void
 }) => {
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor)
+  )
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+
+    // Calculate the direction based on the index difference
+    const activeIndex = views.findIndex((view) => view.id === active.id)
+    const overIndex = views.findIndex((view) => view.id === over.id)
+    const direction = activeIndex > overIndex ? "up" : "down"
+
+    onReorder?.(active.id as string, over.id as string, direction)
+  }
+
   const onlyOneView = views.length === 1
   if (asList) {
     const view = views[0]
@@ -101,27 +114,37 @@ const Views = ({
     )
   }
   return (
-    <>
-      {views.map((view) => {
-        const isActive = view.id === currentView?.id
-        return (
-          <ViewItem
-            key={view.id}
-            view={view}
-            isActive={isActive}
-            jump2View={jump2View}
-            deleteView={deleteView(view.id)}
-            disabledDelete={onlyOneView}
-          />
-        )
-      })}
-    </>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragEnd={handleDragEnd}
+    >
+      <SortableContext
+        items={views.map((v) => v.id)}
+        strategy={horizontalListSortingStrategy}
+      >
+        {views.map((view) => {
+          const isActive = view.id === currentView?.id
+          return (
+            <ViewItem
+              key={view.id}
+              view={view}
+              isActive={isActive}
+              jump2View={jump2View}
+              deleteView={deleteView(view.id)}
+              disabledDelete={onlyOneView}
+            />
+          )
+        })}
+      </SortableContext>
+    </DndContext>
   )
 }
 export const ViewToolbar = (props: {
   tableName: string
   space: string
   isEmbed: boolean
+  isReadOnly?: boolean
 }) => {
   const { space, tableName, viewId } = useContext(TableContext)
   const ref = useRef<HTMLDivElement>(null)
@@ -139,7 +162,7 @@ export const ViewToolbar = (props: {
   const { updateViews, views } = useTableOperation(tableName!, space)
   const navigate = useNavigate()
   const location = useLocation()
-  const { addView, delView } = useViewOperation()
+  const { addView, delView, moveViewPosition } = useViewOperation()
 
   const { currentView, setCurrentViewId, defaultViewId } = useCurrentView({
     space,
@@ -153,6 +176,7 @@ export const ViewToolbar = (props: {
   const [open, setOpen] = useState(false)
   const tableId = getTableIdByRawTableName(tableName)
   const { subPageId, setSubPage, clearSubPage } = useCurrentSubPage()
+  const { t } = useTranslation()
 
   const handleAddRow = async () => {
     const uuid = uuidv7()
@@ -219,6 +243,24 @@ export const ViewToolbar = (props: {
     jump2View(defaultViewId)
   }
 
+  const handleMaximize = useCallback(() => {
+    if (subPageId) {
+      navigate(`/${space}/${subPageId}`)
+    }
+  }, [navigate, space, subPageId])
+
+  const handleReorderViews = useCallback(
+    async (dragId: string, targetId: string, direction: "up" | "down") => {
+      try {
+        await moveViewPosition(dragId, targetId, direction)
+        await updateViews()
+      } catch (error) {
+        console.error("Failed to reorder views:", error)
+      }
+    },
+    [tableName, updateViews]
+  )
+
   return (
     <div ref={ref}>
       <div className="ml-2 flex items-center justify-between border-b pb-1">
@@ -228,10 +270,13 @@ export const ViewToolbar = (props: {
             currentView={currentView}
             jump2View={jump2View}
             deleteView={deleteView}
+            onReorder={handleReorderViews}
           />
-          <Button onClick={handleAddView} variant="ghost" size="sm">
-            <PlusIcon className="h-4 w-4"></PlusIcon>
-          </Button>
+          {!props.isReadOnly && (
+            <Button onClick={handleAddView} variant="ghost" size="sm">
+              <PlusIcon className="h-4 w-4"></PlusIcon>
+            </Button>
+          )}
         </div>
         <div
           className={cn("flex gap-2 hover:opacity-100", {
@@ -245,15 +290,20 @@ export const ViewToolbar = (props: {
             <ViewField view={currentView} />
           </div>
 
-          <Button size="xs" onClick={handleAddRow}>
-            <PlusIcon className="h-4 w-4"></PlusIcon>
-            New
-          </Button>
+          {!props.isReadOnly && (
+            <Button size="xs" onClick={handleAddRow}>
+              <PlusIcon className="h-4 w-4"></PlusIcon>
+              {t("common.new")}
+            </Button>
+          )}
           <Dialog open={open} onOpenChange={handleDialogOpenChange}>
             <DialogTrigger>
               <div></div>
             </DialogTrigger>
-            <DialogContent className="container h-[95vh] p-0 md:max-w-[756px]">
+            <DialogContent
+              className="container h-[95vh] p-0 md:max-w-[756px]"
+              onMaximize={handleMaximize}
+            >
               <ScrollArea className="h-full">
                 <NodeComponent nodeId={subPageId} />
               </ScrollArea>

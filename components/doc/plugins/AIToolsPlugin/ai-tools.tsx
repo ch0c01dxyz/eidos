@@ -3,10 +3,26 @@ import { $convertFromMarkdownString, Transformer } from "@lexical/markdown"
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext"
 import { useClickAway, useKeyPress } from "ahooks"
 import { useChat } from "ai/react"
-import { $createParagraphNode, $getRoot, RangeSelection } from "lexical"
-import { ChevronRightIcon, PauseIcon, RefreshCcwIcon } from "lucide-react"
+import {
+  $createParagraphNode,
+  $getRoot,
+  $isTextNode,
+  LexicalNode,
+  RangeSelection,
+} from "lexical"
+import * as Icons from "lucide-react"
+import {
+  ChevronRightIcon,
+  LucideIcon,
+  PauseIcon,
+  RefreshCcwIcon,
+} from "lucide-react"
+import { useTranslation } from "react-i18next"
 
-import { uuidv7 } from "@/lib/utils"
+import { getCodeFromMarkdown } from "@/lib/markdown"
+import { generateId, getBlockUrl, uuidv7 } from "@/lib/utils"
+import { compileCode } from "@/lib/v3/compiler"
+import builtInRemixPrompt from "@/lib/v3/prompts/built-in-remix-prompt.md?raw"
 import { useAiConfig } from "@/hooks/use-ai-config"
 import { Button } from "@/components/ui/button"
 import {
@@ -28,7 +44,12 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { toast } from "@/components/ui/use-toast"
 import { useUserPrompts } from "@/components/ai-chat/hooks"
+import { BlockRenderer } from "@/components/block-renderer/block-renderer"
+import { Loading } from "@/components/loading"
+import { useAllMblocks } from "@/apps/web-app/[database]/scripts/hooks/use-all-mblocks"
+import { useScript } from "@/apps/web-app/[database]/scripts/hooks/use-script"
 
+import { $createCustomBlockNode } from "../../blocks/custom/node"
 import { useAllDocBlocks } from "../../hooks/use-all-doc-blocks"
 import { useExtBlocks } from "../../hooks/use-ext-blocks"
 import { $transformExtCodeBlock } from "../../utils/helper"
@@ -70,35 +91,99 @@ export function AITools({
     return [...extBlocks.map((block) => block.transform), ...allTransformers]
   }, [extBlocks]) as Transformer[]
 
+  const { reload: reloadBlocks } = useAllMblocks()
+  const [generatedCode, setGeneratedCode] = useState<{
+    ts_code: string
+    code: string
+  } | null>(null)
+
   const [isFinished, setIsFinished] = useState(true)
   const [customPrompt, setCustomPrompt] = useState<string>("")
   const [open, setOpen] = useState(true)
   const [actionOpen, setActionOpen] = useState(false)
   const [aiResult, setAiResult] = useState<string>("")
-  const { getConfigByModel, findFirstAvailableModel, findAvailableModel } =
-    useAiConfig()
+  const {
+    getConfigByModel,
+    findFirstAvailableModel,
+    findAvailableModel,
+    codingModel,
+  } = useAiConfig()
+  const { t } = useTranslation()
+
+  const isMakeItRealRef = useRef(false)
+  const isMakeItReal = () => isMakeItRealRef.current
+
+  const { addScript } = useScript()
   const { messages, setMessages, reload, isLoading, stop } = useChat({
+    onError(error) {
+      console.log("error:", error)
+      toast({
+        title: error.message || t("common.error.tryAgainLater"),
+        description: t("common.error.modelLimitation"),
+      })
+    },
     onFinish(message) {
       setAiResult(message.content)
+      if (isMakeItReal()) {
+        const codeBlocks = getCodeFromMarkdown(message.content)
+        const indexJsxCode = codeBlocks.find(
+          (code) => code.lang === "jsx" || code.lang === "typescript"
+        )?.code
+        if (indexJsxCode) {
+          compileCode(indexJsxCode).then((res) => {
+            if (!res.error) {
+              setGeneratedCode({
+                ts_code: indexJsxCode,
+                code: res.code,
+              })
+            }
+          })
+        }
+      }
       setActionOpen(true)
     },
     body: {
       ...getConfigByModel(currentModel),
       model: currentModel,
+      useTools: false,
     },
   })
 
   const handleAction = useCallback(
-    (action: AIActionEnum) => {
+    async (action: AIActionEnum) => {
       setActionOpen(false)
+
+      const createParagraphNode = () => {
+        const text = aiResult
+        editor.focus()
+        const paragraphNode = $createParagraphNode()
+        $convertFromMarkdownString(text, __allTransformers, paragraphNode)
+        console.log("paragraphNode", paragraphNode)
+        return paragraphNode.getChildren()
+      }
       switch (action) {
         case AIActionEnum.INSERT_BELOW:
+          let scriptId = ""
+          if (isMakeItRealRef.current && generatedCode) {
+            scriptId = generateId()
+            await addScript({
+              id: scriptId,
+              name: content,
+              type: "m_block",
+              description: content,
+              version: "0.1.0",
+              code: generatedCode.code,
+              ts_code: generatedCode.ts_code,
+              enabled: true,
+              commands: [],
+            })
+            reloadBlocks()
+          }
           editor.update(() => {
             const selection = selectionRef.current
-            const text = aiResult
-            editor.focus()
-            const paragraphNode = $createParagraphNode()
-            $convertFromMarkdownString(text, __allTransformers, paragraphNode)
+            const generatedNodes = scriptId
+              ? [$createCustomBlockNode(getBlockUrl(scriptId))]
+              : createParagraphNode()
             if (selection) {
               const newSelection = selection.clone()
               let node
@@ -108,34 +193,46 @@ export function AITools({
               } catch (error) {}
               if (node) {
                 try {
-                  node.getParent()?.insertAfter(paragraphNode)
+                  const parent = node.getParent()
+                  if (parent) {
+                    let currentNode: LexicalNode = parent
+                    for (const node of generatedNodes) {
+                      currentNode.insertAfter(node)
+                      currentNode = node
+                    }
+                  }
                 } catch (error) {
-                  node.insertAfter(paragraphNode)
+                  const root = $getRoot()
+                  root.append(...generatedNodes)
                 }
-                paragraphNode.select()
               } else {
                 const root = $getRoot()
-                root.append(paragraphNode)
+                root.append(...generatedNodes)
               }
             } else {
               const root = $getRoot()
-              root.append(paragraphNode)
+              root.append(...generatedNodes)
             }
             $transformExtCodeBlock(allBlocks)
           })
+          isMakeItRealRef.current = false
           setIsFinished(true)
           break
         case AIActionEnum.REPLACE:
+          if (isMakeItRealRef.current && generatedCode) {
+            return
+          }
           editor.update(() => {
             const selection = selectionRef.current
             const text = aiResult
-            editor.focus()
-            const paragraphNode = $createParagraphNode()
-            $convertFromMarkdownString(text, __allTransformers, paragraphNode)
+            const generatedNodes = createParagraphNode()
             if (selection) {
               const [start, end] = selection.getStartEndPoints() || []
               const isOneLine = start?.key === end?.key
-              if (isOneLine) {
+              const isGeneratedNodesOnlyATextNode =
+                generatedNodes.length === 1 && $isTextNode(generatedNodes[0])
+              if (isOneLine && isGeneratedNodesOnlyATextNode) {
+                // replace part or all of the text
                 selection.insertText(text)
               } else {
                 // FIXME: remove selected nodes and replace with new nodes
@@ -143,9 +240,10 @@ export function AITools({
               }
             } else {
               const root = $getRoot()
-              root.append(paragraphNode)
+              root.append(...generatedNodes)
             }
           })
+          setIsFinished(true)
           break
         case AIActionEnum.TRY_AGAIN:
           reload()
@@ -153,7 +251,15 @@ export function AITools({
       }
       cancelAIAction()
     },
-    [__allTransformers, aiResult, cancelAIAction, editor, extBlocks, reload]
+    [
+      __allTransformers,
+      aiResult,
+      cancelAIAction,
+      editor,
+      extBlocks,
+      reload,
+      isMakeItRealRef.current,
+    ]
   )
 
   const runAction = (
@@ -161,6 +267,7 @@ export function AITools({
     model?: string,
     isCustomPrompt?: boolean
   ) => {
+    console.log("model", model)
     if (!model) {
       toast({
         title: "No model available",
@@ -214,6 +321,7 @@ be between <content-begin> and <content-end>. you just output the transformed co
 
   useKeyPress("esc", () => {
     cancelAIAction(Boolean(isLoading || aiResult.length))
+    isMakeItRealRef.current = false
   })
   useClickAway(
     (e) => {
@@ -225,6 +333,7 @@ be between <content-begin> and <content-end>. you just output the transformed co
         return
       }
       cancelAIAction(Boolean(isLoading || aiResult.length))
+      isMakeItRealRef.current = false
     },
     boxRef,
     ["touchstart", "mousedown"]
@@ -249,7 +358,20 @@ be between <content-begin> and <content-end>. you just output the transformed co
               width: editorWidth,
             }}
           >
-            <AIContentEditor markdown={messages[2]?.content} />
+            {!isMakeItRealRef.current && (
+              <AIContentEditor markdown={messages[2]?.content} />
+            )}
+            {isMakeItRealRef.current &&
+              (isLoading ? (
+                <Loading />
+              ) : (
+                generatedCode && (
+                  <BlockRenderer
+                    code={generatedCode?.ts_code}
+                    compiledCode={generatedCode?.code}
+                  />
+                )
+              ))}
             <div className="flex  w-full items-center justify-end opacity-50">
               {isLoading && (
                 <Button onClick={stop} variant="ghost" size="sm">
@@ -306,7 +428,7 @@ be between <content-begin> and <content-end>. you just output the transformed co
                 const shouldRunCustomAction = !prompts.find((prompt) =>
                   prompt.name.includes(customPrompt)
                 )
-                if (shouldRunCustomAction) {
+                if (shouldRunCustomAction && customPrompt.length) {
                   runCustomAction(customPrompt)
                 }
               }
@@ -316,7 +438,22 @@ be between <content-begin> and <content-end>. you just output the transformed co
             <CommandList className="max-h-[20rem]">
               <CommandEmpty>No Prompt found.</CommandEmpty>
               <CommandGroup heading="Built-in Prompts" ref={commandGroupRef}>
+                <CommandItem
+                  className="flex items-center justify-between"
+                  onSelect={() => {
+                    isMakeItRealRef.current = true
+                    runAction(builtInRemixPrompt, codingModel)
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <Icons.WandIcon className="h-5 w-5 opacity-50" />
+                    <span>Make it real</span>
+                  </div>
+                </CommandItem>
                 {builtInPrompts.map((prompt) => {
+                  const Icon = Icons[
+                    prompt.icon as keyof typeof Icons
+                  ] as LucideIcon
                   if (prompt.parameters) {
                     const { name, key, value, type, description, required } =
                       prompt.parameters[0]
@@ -333,7 +470,10 @@ be between <content-begin> and <content-end>. you just output the transformed co
                             className="flex items-center justify-between"
                             onSelect={() => setOpenDropdownId(prompt.name)}
                           >
-                            <span>{prompt.name}</span>
+                            <div className="flex items-center gap-2">
+                              <Icon className="h-5 w-5 opacity-50" />
+                              <span>{prompt.name}</span>
+                            </div>
                             <ChevronRightIcon className="h-5 w-5" />
                           </CommandItem>
                         </DropdownMenuTrigger>
@@ -349,7 +489,6 @@ be between <content-begin> and <content-end>. you just output the transformed co
                               <DropdownMenuItem
                                 key={item}
                                 onClick={(e) => {
-                                  console.log(e)
                                   e.preventDefault()
                                   const renderedPrompt = prompt.content.replace(
                                     `{{${key}}}`,
@@ -372,11 +511,14 @@ be between <content-begin> and <content-end>. you just output the transformed co
                   return (
                     <CommandItem
                       key={prompt.name}
-                      onSelect={() =>
+                      onSelect={(e) => {
                         runAction(prompt.content, findFirstAvailableModel())
-                      }
+                      }}
                     >
-                      <span>{prompt.name}</span>
+                      <div className="flex items-center gap-2">
+                        <Icon className="h-5 w-5 opacity-50" />
+                        <span>{prompt.name}</span>
+                      </div>
                     </CommandItem>
                   )
                 })}
@@ -385,7 +527,9 @@ be between <content-begin> and <content-end>. you just output the transformed co
                 {prompts.map((prompt) => (
                   <CommandItem
                     key={prompt.id}
-                    onSelect={() => runAction(prompt.code, prompt.model)}
+                    onSelect={() => {
+                      runAction(prompt.code, prompt.model)
+                    }}
                   >
                     <span>{prompt.name}</span>
                   </CommandItem>

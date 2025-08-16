@@ -1,5 +1,7 @@
+import { useState } from "react"
 import { SettingsIcon } from "lucide-react"
 import { Link, useNavigate } from "react-router-dom"
+import { useTranslation } from "react-i18next"
 
 import { useCurrentPathInfo } from "@/hooks/use-current-pathinfo"
 import { useSpace } from "@/hooks/use-space"
@@ -28,69 +30,119 @@ import { Label } from "@/components/ui/label"
 import { Button } from "../ui/button"
 
 export function Settings() {
+  const { t } = useTranslation()
   const { space } = useCurrentPathInfo()
-  const { exportSpace, deleteSpace } = useSpace()
+  const { exportSpace, deleteSpace, rebuildIndex } = useSpace()
   const navigate = useNavigate()
+  const [confirmName, setConfirmName] = useState("")
+  const [isRebuilding, setIsRebuilding] = useState(false)
+
   const handleExport = () => {
     exportSpace(space)
   }
 
   const handleDelete = async () => {
-    await deleteSpace(space)
-    navigate("/")
-    // reload to reset the app
-    window.location.reload()
+    if (confirmName === space) {
+      await deleteSpace(space)
+      navigate("/")
+      window.location.reload()
+    } else {
+      alert("The space name does not match.")
+    }
   }
+
+  const handleRebuildIndex = async () => {
+    setIsRebuilding(true)
+    try {
+      await rebuildIndex()
+      alert("Index rebuilt successfully!")
+    } catch (error) {
+      console.error("Error rebuilding index:", error)
+      alert("Failed to rebuild index. Please try again.")
+    } finally {
+      setIsRebuilding(false)
+    }
+  }
+
   return (
     <Card className="border-0 p-0">
       <CardHeader>
-        <CardTitle>Space Settings</CardTitle>
+        <CardTitle>{t('space.settings.title')}</CardTitle>
         <CardDescription>
-          Settings only apply to this space. if you want to change settings for
-          all spaces, go to{" "}
+          {t('space.settings.description')}{" "}
           <Link to="/settings" className="text-blue-500 underline">
-            global settings
+            {t('space.settings.globalSettings')}
           </Link>
         </CardDescription>
       </CardHeader>
       <CardContent>
         <div className="grid gap-6">
           <div className="grid gap-3">
-            <Label htmlFor="name">Name</Label>
+            <Label htmlFor="name">{t('common.name')}</Label>
             <Input id="name" type="text" disabled defaultValue={space} />
           </div>
           <hr />
           <div className="grid gap-3">
-            <Label htmlFor="description">Export</Label>
+            <Label htmlFor="description">{t('common.export')}</Label>
+            <p className="text-sm text-muted-foreground">
+              {t('space.settings.exportDescription')}
+            </p>
             <Button
               size="sm"
-              className=" max-w-max"
+              className="max-w-max"
               variant="outline"
               onClick={handleExport}
             >
-              Export Space
+              {t('space.settings.exportSpace')}
             </Button>
           </div>
           <div className="grid gap-3">
-            <Label htmlFor="description">Danger zone</Label>
+            <Label htmlFor="rebuild-index">{t('space.settings.rebuildIndex')}</Label>
+            <p className="text-sm text-muted-foreground">
+              {t('space.settings.rebuildIndexDescription')}
+            </p>
+            <Button
+              size="sm"
+              className="max-w-max"
+              variant="outline"
+              onClick={handleRebuildIndex}
+              disabled={isRebuilding}
+            >
+              {isRebuilding ? t('space.settings.rebuilding') : t('space.settings.rebuildIndex')}
+            </Button>
+          </div>
+          <div className="grid gap-3">
+            <Label htmlFor="description">{t('space.settings.dangerZone')}</Label>
+            <p className="text-sm text-muted-foreground">
+              {t('space.settings.deleteSpaceDescription')}
+            </p>
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button size="sm" className=" max-w-max" variant="destructive">
-                  Delete Space
+                  {t('space.settings.deleteSpace')}
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                  <AlertDialogTitle>{t('common.areYouAbsolutelySure')}</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This action cannot be undone. This will permanently delete
-                    your space.
+                    {t('space.settings.deleteSpaceWarning', { spaceName: space })}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
+                <Input
+                  id="confirmName"
+                  type="text"
+                  placeholder={t('space.settings.typeSpaceName')}
+                  value={confirmName}
+                  onChange={(e) => setConfirmName(e.target.value)}
+                />
                 <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleDelete}>
-                    Continue
+                  <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleDelete}
+                    disabled={confirmName !== space}
+                  >
+                    {t('common.continue')}
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
@@ -103,6 +155,7 @@ export function Settings() {
 }
 
 export const SpaceSettings = () => {
+  const { t } = useTranslation()
   return (
     <Dialog>
       <DialogTrigger asChild>
@@ -113,7 +166,7 @@ export const SpaceSettings = () => {
           asChild
         >
           <span>
-            <SettingsIcon className="pr-2" /> <span>Settings</span>
+            <SettingsIcon className="pr-2" /> <span>{t('common.settings')}</span>
           </span>
         </Button>
       </DialogTrigger>

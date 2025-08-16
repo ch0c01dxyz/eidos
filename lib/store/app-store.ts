@@ -1,9 +1,13 @@
 // need persist, store user config in localstorage, make app response faster
 
+import { useSidebar } from "@/components/ui/sidebar"
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 
 interface AppState {
+  isSidebarOpen: boolean
+  setSidebarOpen: (isOpen: boolean) => void
+
   lastOpenedTable: string
   setLastOpenedTable: (table: string) => void
 
@@ -13,18 +17,16 @@ interface AppState {
   aiModel: string
   setAIModel: (model: string) => void
 
-  isSidebarOpen: boolean
-  setSidebarOpen: (isSidebarOpen: boolean) => void
-
   isFileManagerOpen: boolean
   setFileManagerOpen: (isOpen: boolean) => void
+
 }
 
-export const useAppStore = create<AppState>()(
+export const useAppStoreBase = create<AppState>()(
   persist(
     (set) => ({
-      isSidebarOpen: true,
-      setSidebarOpen: (isSidebarOpen) => set({ isSidebarOpen }),
+      isSidebarOpen: false,
+      setSidebarOpen: (isOpen) => set({ isSidebarOpen: isOpen }),
 
       isFileManagerOpen: false,
       setFileManagerOpen: (isFileManagerOpen) => set({ isFileManagerOpen }),
@@ -44,3 +46,18 @@ export const useAppStore = create<AppState>()(
     }
   )
 )
+
+export const useAppStore = () => {
+  const store = useAppStoreBase()
+  const { open, setOpen } = useSidebar()
+
+
+  return {
+    ...store,
+    isSidebarOpen: open,
+    setSidebarOpen: (isOpen: boolean) => {
+      store.setSidebarOpen(isOpen)
+      setOpen(isOpen)
+    }
+  }
+}

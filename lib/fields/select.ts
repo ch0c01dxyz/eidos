@@ -2,6 +2,8 @@ import type { SelectCell } from "@/components/table/views/grid/cells/select-cell
 
 import { BaseField } from "./base"
 import { CompareOperator, FieldType, GridCellKind } from "./const"
+import { MultiSelectCell } from "@/components/table/views/grid/cells/multi-select-cell"
+import { MultiSelectField } from "./multi-select"
 
 export type SelectOption = {
   id: string
@@ -125,6 +127,11 @@ export class SelectField extends BaseField<SelectCell, SelectProperty> {
     }, {} as Record<string, string>),
   }
 
+  /**
+   * @param colorName name of the color. eg "default" | "gray"
+   * @param theme theme of the color. eg "light" | "dark"
+   * @returns hex value of the color. eg "#cccccc"
+   */
   static getColorValue(colorName: string, theme: "light" | "dark" = "light") {
     return `#${SelectField.colorNameValueMap[theme][colorName]}`
   }
@@ -160,6 +167,17 @@ export class SelectField extends BaseField<SelectCell, SelectProperty> {
       copyData: rawData,
       allowOverlay: true,
     }
+  }
+
+  /**
+   * getCellContentViaLookup is used when the field is used as a lookup target field. 
+   * lookup will convert the raw data to a multi-select cell, value split by comma. 
+   * @param rawData 
+   * @returns 
+   */
+  getCellContentViaLookup(rawData: string): MultiSelectCell {
+    const multiSelectField = new MultiSelectField(this.column)
+    return multiSelectField.getCellContent(rawData)
   }
 
   cellData2RawData(cell: SelectCell) {
@@ -223,10 +241,19 @@ export class SelectField extends BaseField<SelectCell, SelectProperty> {
     this.column.property.options = options
   }
 
+  static getNextAvailableColor(existingOptions: SelectOption[]): string {
+    const allColors = SelectField.colors.light.map(c => c.name)
+    const usedColors = new Set(existingOptions.map(o => o.color))
+    return allColors.find(color => !usedColors.has(color)) ||
+      allColors[existingOptions.length % allColors.length]
+  }
+
   addOption(name: string) {
     const options = this.column.property?.options ?? []
+    const nextColor = SelectField.getNextAvailableColor(options)
+
     const newOptions = [
-      { id: name, name, color: SelectField.defaultColor },
+      { id: name, name, color: nextColor },
       ...options,
     ]
     this.column.property.options = newOptions

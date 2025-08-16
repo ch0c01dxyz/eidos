@@ -1,9 +1,54 @@
-import { clsx, type ClassValue } from "clsx"
-import { twMerge } from "tailwind-merge"
-import { uuidv7 } from "uuidv7"
-
-export { uuidv7 } from "uuidv7"
+import type {
+  Message
+} from 'ai';
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+import { uuidv7 } from "uuidv7";
+export { uuidv7 } from "uuidv7";
 // export { v4 as uuidv7 } from "uuid"
+
+export function sanitizeUIMessages(messages: Array<Message>): Array<Message> {
+  const messagesBySanitizedToolInvocations = messages.map((message) => {
+    if (message.role !== 'assistant') return message;
+
+    if (!message.toolInvocations) return message;
+
+    const toolResultIds: Array<string> = [];
+
+    for (const toolInvocation of message.toolInvocations) {
+      if (toolInvocation.state === 'result') {
+        toolResultIds.push(toolInvocation.toolCallId);
+      }
+    }
+
+    const sanitizedToolInvocations = message.toolInvocations.filter(
+      (toolInvocation) =>
+        toolInvocation.state === 'result' ||
+        toolResultIds.includes(toolInvocation.toolCallId),
+    );
+
+    return {
+      ...message,
+      toolInvocations: sanitizedToolInvocations,
+    };
+  });
+
+  return messagesBySanitizedToolInvocations.filter(
+    (message) =>
+      message.content.length > 0 ||
+      (message.toolInvocations && message.toolInvocations.length > 0),
+  );
+}
+
+export function getMessageIdFromAnnotations(message: Message) {
+  if (!message.annotations) return message.id;
+
+  const [annotation] = message.annotations;
+  if (!annotation) return message.id;
+
+  // @ts-expect-error messageIdFromServer is not defined in MessageAnnotation
+  return annotation.messageIdFromServer;
+}
 
 export const isUuidv4 = (id: string) => {
   // for performance, we only check the 15th character which is the version number
@@ -111,10 +156,10 @@ export const getWeek = (day: string) => {
     return parseInt(day.split("-w")[1])
   }
   const date = new Date(day)
-  const onejan = new Date(date.getFullYear(), 0, 1)
-  return Math.ceil(
-    ((date.getTime() - onejan.getTime()) / 86400000 + onejan.getDay() + 1) / 7
-  )
+  date.setHours(0, 0, 0, 0)
+  date.setDate(date.getDate() + 3 - (date.getDay() + 6) % 7)
+  const week1 = new Date(date.getFullYear(), 0, 4)
+  return 1 + Math.round(((date.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7)
 }
 
 /**
@@ -125,15 +170,25 @@ export const getWeek = (day: string) => {
 export const getDaysByYearWeek = (weekNodeId: string) => {
   const year = parseInt(weekNodeId.slice(0, 4))
   const week = parseInt(weekNodeId.slice(6))
-  const d = new Date(year, 0, 1)
-  const w = d.getDay()
-  const target = w > 4 ? 1 : 0
-  const day = d.getDate() + (w <= 4 ? 1 : 8) - w
+
+  // Get Jan 4 for the year (always in week 1 by ISO)
+  const jan4th = new Date(year, 0, 4)
+  
+  // Get Monday of week 1
+  const firstWeekMonday = new Date(jan4th)
+  firstWeekMonday.setDate(jan4th.getDate() - (jan4th.getDay() || 7) + 1)
+  
+  // Calculate the start date of the requested week
+  const startDate = new Date(firstWeekMonday)
+  startDate.setDate(firstWeekMonday.getDate() + (week - 1) * 7)
+
   const days = []
   for (let i = 0; i < 7; i++) {
-    const date = new Date(year, 0, day + (week - 1) * 7 + i + target)
+    const date = new Date(startDate)
+    date.setDate(startDate.getDate() + i)
     days.push(getLocalDate(date))
   }
+
   return days
 }
 
@@ -178,9 +233,66 @@ export function timeAgo(date: Date) {
   }
 }
 
-export const proxyImageURL = (url?: string) => {
+export const proxyURL = (url?: string) => {
   if (!url) {
     return ""
   }
   return `https://proxy.eidos.space?url=${url}`
 }
+
+
+export const getBlockUrl = (blockId: string, props?: Record<string, any>) => {
+  const url = new URL(`block://${blockId}`)
+  if (props) {
+    Object.entries(props).forEach(([key, value]) => {
+      url.searchParams.set(key, value)
+    })
+  }
+  return url.toString()
+}
+
+export const getBlockIdFromUrl = (url: string) => {
+  try {
+    const blockId = url.replace('block://', '')
+    return blockId.split('?')[0]
+  } catch (error) {
+    console.error(error)
+    return ""
+  }
+}
+
+export const getBlockUrlWithParams = (id: string, params: Record<string, any>) => {
+  const blockUrl = getBlockUrl(id)
+  const blockUrlWithParams = new URL(blockUrl)
+  Object.entries(params).forEach(([key, value]) => {
+    blockUrlWithParams.searchParams.set(key, value)
+  })
+  return blockUrlWithParams.toString()
+}
+
+export const isStandaloneBlocksPath = (pathname: string) => {
+  // /:space/standalone-blocks/:id
+  return /^\/[\w-]+\/standalone-blocks\/\w+$/.test(pathname)
+}
+
+interface ApplicationError extends Error {
+  info: string;
+  status: number;
+}
+
+export const fetcher = async (url: string) => {
+  const res = await fetch(url);
+
+  if (!res.ok) {
+    const error = new Error(
+      'An error occurred while fetching the data.',
+    ) as ApplicationError;
+
+    error.info = await res.json();
+    error.status = res.status;
+
+    throw error;
+  }
+
+  return res.json();
+};

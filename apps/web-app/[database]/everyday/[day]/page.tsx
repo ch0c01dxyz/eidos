@@ -15,6 +15,8 @@ import { Editor } from "@/components/doc/editor"
 import { WeekPage } from "../[week]/page"
 import { useDays } from "../hooks"
 
+// import Timeline from "../timeline"
+
 export default function EverydayPage() {
   const [open, setOpen] = useState(false)
   const { day, database } = useParams()
@@ -33,7 +35,7 @@ export default function EverydayPage() {
   }
 
   return (
-    <div className="prose mx-auto w-full p-4 pt-0 lg:prose-xl xl:prose-2xl">
+    <div className="flex gap-4 grow">
       <Editor
         isEditable
         title={day}
@@ -101,6 +103,13 @@ export default function EverydayPage() {
           </Popover>
         }
       />
+      {/* <Timeline
+        recordDates={days}
+        currentDay={new Date(day as string)}
+        onTimeSelect={(date) => {
+          handleDayClick(date)
+        }}
+      /> */}
     </div>
   )
 }

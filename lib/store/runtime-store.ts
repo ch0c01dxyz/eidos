@@ -35,14 +35,21 @@ interface AppRuntimeState {
 
   blockUIMsg: string | null
   blockUIData?: Record<string, any>
-  setBlockUIMsg: (blockUIMsg: string) => void
+  setBlockUIMsg: (blockUIMsg: string | null) => void
   setBlockUIData: (blockUIData: Record<string, any>) => void
+
+  // running script
+  runningCommand: string | null
+  setRunningCommand: (runningCommand: string | null) => void
 }
 
 export const useAppRuntimeStore = create<AppRuntimeState>()((set) => ({
   isEmbeddingModeLoaded: false,
   setEmbeddingModeLoaded: (isEmbeddingModeLoaded) =>
     set({ isEmbeddingModeLoaded }),
+
+  runningCommand: null,
+  setRunningCommand: (runningCommand) => set({ runningCommand }),
 
   isKeyboardShortcutsOpen: false,
   setKeyboardShortcutsOpen: (isKeyboardShortcutsOpen) =>

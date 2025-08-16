@@ -1,9 +1,8 @@
-import { ServerDatabase } from "@/apps/publish/lib/ServerDatabase"
 import { Database, Sqlite3Static } from "@sqlite.org/sqlite-wasm"
 
-import { MsgType } from "@/lib/const"
+import { EidosDataEventChannelName, MsgType } from "@/lib/const"
 import { FieldType } from "@/lib/fields/const"
-import { logger } from "@/lib/log"
+import { logger } from "@/lib/env"
 import { ColumnTableName } from "@/lib/sqlite/const"
 import { buildSql, isReadOnlySql } from "@/lib/sqlite/helper"
 import {
@@ -45,6 +44,10 @@ import { ViewTable } from "./meta-table/view"
 import { RowsManager } from "./sdk/rows"
 import { TableManager } from "./sdk/table"
 import { withSqlite3AllUDF } from "./udf"
+import { BaseServerDatabase } from "@/lib/sqlite/interface"
+import { ChatTable } from "./meta-table/chat"
+import { MessageTable } from "./meta-table/message"
+import { Email } from "postal-mime"
 
 export type EidosTable =
   | DocTable
@@ -56,8 +59,11 @@ export type EidosTable =
   | EmbeddingTable
   | FileTable
 
+
+export type EidosDatabase = Database | BaseServerDatabase
+
 export class DataSpace {
-  db: Database
+  db: EidosDatabase
   draftDb: DataSpace | undefined
   sqlite3: Sqlite3Static | undefined
   undoRedoManager: SQLiteUndoRedo
@@ -72,32 +78,74 @@ export class DataSpace {
   column: ColumnTable
   reference: ReferenceTable
   embedding: EmbeddingTable
+  chat: ChatTable
+  message: MessageTable
   file: FileTable
   dataChangeTrigger: DataChangeTrigger
   linkRelationUpdater: LinkRelationUpdater
   allTables: BaseTable<any>[] = []
+  hasLoadExtension = false
+  // worker to main thread
+  postMessage?: (data: any, transfer?: any[]) => void
+  callRenderer?: (type: any, data: any) => Promise<any>
+  // channel broadcast
+  dataEventChannel: {
+    postMessage: (data: any) => void
+  }
 
   // for trigger
   eventHandler: DataChangeEventHandler
+  efsManager?: EidosFileSystemManager
 
   // for auto migration
   hasMigrated = false
   constructor(config: {
-    db: Database
+    db: EidosDatabase
     activeUndoManager: boolean
     dbName: string
     context: {
       setInterval?: typeof setInterval
     }
-    createUDF?: (db: Database) => void,
+    hasLoadExtension?: boolean
+    createUDF?: (db: EidosDatabase) => void,
     sqlite3?: Sqlite3Static
     draftDb?: DataSpace
+    postMessage?: (data: any, transfer?: any[]) => void
+    callRenderer?: (type: any, data: any) => Promise<any>
+    efsManager?: EidosFileSystemManager
+    dataEventChannel?: {
+      postMessage: (data: any) => void
+    }
   }) {
-    const { db, activeUndoManager, dbName, sqlite3, draftDb, context, createUDF } = config
+    const { db, activeUndoManager, dbName, sqlite3, draftDb, context, createUDF, postMessage, efsManager, dataEventChannel, hasLoadExtension, callRenderer } = config
     this.db = db
+
+    this.hasLoadExtension = Boolean(hasLoadExtension)
+    if (dataEventChannel) {
+      this.dataEventChannel = dataEventChannel
+    } else {
+      this.dataEventChannel = new BroadcastChannel(EidosDataEventChannelName)
+    }
+
+    if (callRenderer) {
+      this.callRenderer = callRenderer
+    } else {
+      this.callRenderer = (type: any, data: any) => {
+        const channel = new MessageChannel()
+        self.postMessage({ type, data }, [channel.port2])
+        return new Promise((resolve) => {
+          channel.port1.onmessage = (event) => {
+            resolve(event.data)
+          }
+        })
+      }
+    }
     this.sqlite3 = sqlite3
     this.draftDb = draftDb
     this.dbName = dbName
+    this.postMessage = postMessage
+    this.efsManager = efsManager
+
     this.initUDF()
     this.eventHandler = new DataChangeEventHandler(this)
     this.dataChangeTrigger = new DataChangeTrigger()
@@ -105,6 +153,7 @@ export class DataSpace {
       this,
       context.setInterval
     )
+    // meta table
     this.doc = new DocTable(this)
     this.action = new ActionTable(this)
     this.script = new ScriptTable(this)
@@ -114,6 +163,8 @@ export class DataSpace {
     this.column = new ColumnTable(this)
     this.embedding = new EmbeddingTable(this)
     this.reference = new ReferenceTable(this)
+    this.chat = new ChatTable(this)
+    this.message = new MessageTable(this)
     //
     this.allTables = [
       this.doc,
@@ -125,17 +176,23 @@ export class DataSpace {
       this.embedding,
       this.file,
       this.reference,
+      this.chat,
+      this.message,
     ]
+    this.initMetaTable()
+
     // migration
     if (this.draftDb) {
       const dbMigrator = new DbMigrator(this, this.draftDb)
-      dbMigrator.migrate()
+      dbMigrator.migrate().then(() => {
+        this.hasMigrated = true
+      })
       // // after migration, enable opfs SyncAccessHandle Pool for better performance
       // this.sqlite3.installOpfsSAHPoolVfs({}).then((poolUtil) => {
       //   console.debug("poolUtil", poolUtil)
       // })
     }
-    this.initMetaTable()
+
     if (createUDF) {
       createUDF(this.db)
     }
@@ -151,19 +208,22 @@ export class DataSpace {
   }
 
   private initUDF() {
-    if (!this.sqlite3) {
-      return
-    }
-    const allUfs = withSqlite3AllUDF(this.sqlite3)
+    const allUfs = withSqlite3AllUDF(this.dataEventChannel)
     // system functions
-    allUfs.forEach((udf) => {
-      this.db.createFunction(udf as any)
-    })
+    if (this.db instanceof BaseServerDatabase) {
+      allUfs.ALL_UDF_NO_CTX.forEach((udf) => {
+        this.db.createFunction(udf as any)
+      })
+    } else {
+      allUfs.ALL_UDF.forEach((udf) => {
+        this.db.createFunction(udf as any)
+      })
+    }
   }
 
   private initMetaTable() {
     this.allTables.forEach((table) => {
-      this.exec(table.createTableSql)
+      this.db.exec(table.createTableSql);
     })
   }
 
@@ -416,7 +476,10 @@ export class DataSpace {
 
   // views
   public async listViews(tableId: string) {
-    return await this.view.list({ table_id: tableId })
+    return await this.view.list({ table_id: tableId }, {
+      order: 'ASC',
+      orderBy: 'position'
+    })
   }
 
   public async addView(view: IView) {
@@ -509,7 +572,13 @@ export class DataSpace {
   public async listScripts(status: ScriptStatus = "all") {
     const query =
       status === "all" ? undefined : { enabled: status === "enabled" }
-    return this.script.list(query)
+    return this.script.list(query, {
+      orderBy: "created_at",
+      order: "DESC",
+    })
+  }
+  public async callScript(id: string, input: Record<string, any>) {
+    return await this.script.call(id, input)
   }
 
   public async getScript(id: string) {
@@ -533,7 +602,7 @@ export class DataSpace {
 
   // docs
   public async rebuildIndex(refillNullMarkdown: boolean = false) {
-    await this.doc.rebuildIndex(refillNullMarkdown)
+    await this.doc.rebuildIndex({ refillNullMarkdown })
   }
 
   @timeit(100)
@@ -568,12 +637,16 @@ export class DataSpace {
         is_day_page: isDayPage,
       })
     } else {
-      await this.doc.set(docId, {
-        id: docId,
-        content,
-        markdown,
-        is_day_page: isDayPage,
-      })
+      // only update when content or markdown changed
+      if (res.content !== content || res.markdown !== markdown) {
+        console.log("doc really changed", docId)
+        await this.doc.set(docId, {
+          id: docId,
+          content,
+          markdown,
+          is_day_page: isDayPage,
+        })
+      }
     }
   }
 
@@ -597,7 +670,8 @@ export class DataSpace {
     docId: string,
     mdStr: string,
     parent_id?: string,
-    title?: string
+    title?: string,
+    mode?: "replace" | "append" | "prepend"
   ) {
     return this.createOrUpdateDoc({
       docId,
@@ -605,6 +679,7 @@ export class DataSpace {
       type: "markdown",
       parent_id,
       title,
+      mode
     })
   }
 
@@ -614,7 +689,7 @@ export class DataSpace {
     type: "html" | "markdown" | "email"
     parent_id?: string
     title?: string
-    mode?: "replace" | "append"
+    mode?: "replace" | "append" | "prepend"
   }) {
     if (isDayPageId(data.docId)) {
       return this.doc.createOrUpdate({
@@ -657,8 +732,19 @@ export class DataSpace {
     return this.doc.search(query)
   }
 
+
+  public async createTable(fields: Array<{
+    name: string
+    type: FieldType
+  }>, name: string) {
+    const { createTableSql, tableId } = TableManager.generateCreateTableSql(fields)
+    console.log("create table sql: ", createTableSql)
+    await this.createTableViaSchema(tableId, name, createTableSql)
+    return tableId
+  }
+
   @timeit(100)
-  public async createTable(
+  public async createTableViaSchema(
     id: string,
     name: string,
     tableSchema: string,
@@ -667,16 +753,18 @@ export class DataSpace {
     // FIXME: should use db transaction to execute multiple sql
     this.db.transaction(async (db) => {
       await this.addTreeNode({ id, name, type: "table", parent_id })
-      db.exec({
-        sql: tableSchema,
-      })
+      db.exec(tableSchema)
       // create view for table
       await this.createDefaultView(id)
     })
   }
 
-  public async importCsv(file: File) {
+  public async importCsv(file: {
+    name: string
+    content: string
+  }) {
     const csvImport = new CsvImportAndExport()
+    console.log("importing csv file", file)
     const tableId = await csvImport.import(file, this)
     return tableId
   }
@@ -686,7 +774,10 @@ export class DataSpace {
     return await csvImport.export(tableId, this)
   }
 
-  public async importMarkdown(file: File) {
+  public async importMarkdown(file: {
+    name: string
+    content: string
+  }) {
     const markdownImport = new MarkdownImportAndExport()
     const nodeId = await markdownImport.import(file, this)
     return nodeId
@@ -747,13 +838,23 @@ export class DataSpace {
     //   sql,
     //   bind
     // )
-    if (this.db instanceof ServerDatabase) {
-      return this.db.exec({
-        sql,
-        bind,
-        returnValue: "resultRows",
-        rowMode: "object",
-      })
+    if (db instanceof BaseServerDatabase) {
+      try {
+        return db.exec({
+          sql,
+          bind,
+          returnValue: "resultRows",
+          rowMode: "object",
+        })
+      } catch (error: any) {
+        if (error.toString().includes("SqliteError")) {
+          this.notify({
+            title: "SqliteError",
+            description: error.toString(),
+          })
+        }
+        console.log(error)
+      }
     }
     db.exec({
       sql,
@@ -769,7 +870,11 @@ export class DataSpace {
   // FIXME: there are some problem with headless lexical run in worker
   // return markdown string, compute in worker
   // public async asyncGetDocMarkdown(docId: string) {
-  //   return await getDocMarkdown(this.dbName, docId)
+  //   const doc = await this.doc.get(docId)
+  //   if (!doc) {
+  //     throw new Error(`doc ${docId} not found`)
+  //   }
+  //   return await _getDocMarkdown(doc.markdown)
   // }
   // return object array
   public async exec2(sql: string, bind: any[] = []) {
@@ -970,7 +1075,7 @@ export class DataSpace {
   ) {
     // console.debug(sql, bind)
     const res: any[] = []
-    if (this.db instanceof ServerDatabase) {
+    if (this.db instanceof BaseServerDatabase) {
       return this.db.exec({
         sql,
         bind,
@@ -991,7 +1096,7 @@ export class DataSpace {
     } catch (error: any) {
       logger.error(error)
       logger.error({ sql, bind })
-      postMessage({
+      this.postMessage?.({
         type: MsgType.Error,
         data: {
           message: error.message,
@@ -1080,7 +1185,7 @@ export class DataSpace {
   }
 
   public onUpdate() {
-    postMessage({
+    this.postMessage?.({
       type: MsgType.DataUpdateSignal,
       data: {
         database: this.dbName,
@@ -1090,14 +1195,15 @@ export class DataSpace {
   }
 
   public notify(msg: { title: string; description: string }) {
-    postMessage({
+    this.postMessage?.({
       type: MsgType.Notify,
       data: msg,
     })
   }
 
   public blockUIMsg(msg: string | null, data?: Record<string, any>) {
-    postMessage({
+    console.log("blockUIMsg", msg, data)
+    this.postMessage?.({
       type: MsgType.BlockUIMsg,
       data: {
         msg,
@@ -1105,4 +1211,16 @@ export class DataSpace {
       },
     })
   }
+
+  /**
+   * 往指定邮箱发送邮件时，会被 cloudflare worker 拦截，
+   * worker 再转发到 api-agent，最后 api-agent 调用 currentSpace.email() 方法
+   * @param email 
+   */
+  public email(email: Email) {
+    // 根据邮件内容转发给可以处理邮件的 script
+    // 1. find email handler script
+    // 2. call email handler script
+  }
+
 }

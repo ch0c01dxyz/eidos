@@ -2,10 +2,11 @@
 
 import { zodResolver } from "@hookform/resolvers/zod"
 import { ControllerRenderProps, useForm } from "react-hook-form"
+import { useTranslation } from "react-i18next"
 import * as z from "zod"
 
-import { efsManager } from "@/lib/storage/eidos-file-system"
 import { useActivationCodeStore } from "@/hooks/use-activation"
+import { useEidosFileSystemManager } from "@/hooks/use-fs"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -50,7 +51,8 @@ export function ProfileForm() {
     mode: "onChange",
   })
   const { clientId } = useActivationCodeStore()
-
+  const { efsManager } = useEidosFileSystemManager()
+  const { t } = useTranslation()
   const handleChangeAvatar = async (
     field: ControllerRenderProps<
       {
@@ -112,7 +114,7 @@ export function ProfileForm() {
             name="username"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Name</FormLabel>
+                <FormLabel>{t("common.name")}</FormLabel>
                 <FormControl>
                   <Input placeholder="yahaha" {...field} />
                 </FormControl>
@@ -125,7 +127,9 @@ export function ProfileForm() {
           />
         </div>
         <FormItem className="flex items-baseline gap-2">
-          <FormLabel className="  whitespace-nowrap">Client ID</FormLabel>
+          <FormLabel className="  whitespace-nowrap">
+            {t("settings.general.clientId")}
+          </FormLabel>
           <FormControl>
             <Input disabled value={clientId} />
           </FormControl>
@@ -145,7 +149,7 @@ export function ProfileForm() {
             </FormItem>
           )}
         />
-        <Button type="submit">Update</Button>
+        <Button type="submit">{t("common.update")}</Button>
       </form>
     </Form>
   )

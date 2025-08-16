@@ -10,26 +10,37 @@ import {
   $convertFromMarkdownString,
   $convertToMarkdownString,
 } from "@lexical/markdown"
-import { $getRoot, $insertNodes } from "lexical"
+import { $getRoot, $insertNodes, $nodesOfType, LexicalEditor } from "lexical"
 import zip from "lodash/zip"
 
 import { getAllLinks } from "@/lib/markdown"
 import { getSqliteProxy } from "@/lib/sqlite/channel"
 import { efsManager } from "@/lib/storage/eidos-file-system"
-import { AllNodes } from "@/components/doc/nodes"
-import { $getUrlMetaData } from "@/components/doc/nodes/BookmarkNode"
+import { $getUrlMetaData } from "@/components/doc/blocks/bookmark/node"
 import {
   allTransformers,
   markdownLinkInfoMap,
 } from "@/components/doc/plugins/const"
+import { CodeNode } from "@lexical/code"
+import { $createMermaidNode } from "@/components/doc/blocks/mermaid/node"
+import { getAllNodes } from "@/components/doc/nodes"
+
+let editor: LexicalEditor
+
+export const getHeadlessEditor = () => {
+  if (!editor) {
+    editor = createHeadlessEditor({
+      nodes: getAllNodes(),
+      onError: () => { },
+    })
+  }
+  return editor
+}
 
 export const _getDocMarkdown = async (
   articleEditorStateJSON: string
 ): Promise<string> => {
-  const editor = createHeadlessEditor({
-    nodes: AllNodes,
-    onError: () => {},
-  })
+  const editor = getHeadlessEditor()
   try {
     const state = editor.parseEditorState(articleEditorStateJSON)
     if (state.isEmpty()) {
@@ -91,8 +102,8 @@ export const _convertEmail2State = async (
 export const _convertHtml2State = async (html: string): Promise<string> => {
   return new Promise((resolve) => {
     const editor = createHeadlessEditor({
-      nodes: AllNodes,
-      onError: () => {},
+      nodes: getAllNodes(),
+      onError: () => { },
     })
 
     editor.update(
@@ -134,14 +145,21 @@ export const _convertMarkdown2State = async (
   })
   return new Promise((resolve) => {
     const editor = createHeadlessEditor({
-      nodes: AllNodes,
-      onError: () => {},
+      nodes: getAllNodes(),
+      onError: () => { },
     })
 
     editor.update(
       () => {
         $convertFromMarkdownString(markdown, allTransformers)
         markdownLinkInfoMap.clear()
+        // after calling $convertFromMarkdownString()
+        for (const code of $nodesOfType(CodeNode)) {
+          const lang = code.getLanguage()
+          if (lang === "mermaid") {
+            code.replace($createMermaidNode(code.getTextContent()))
+          }
+        }
       },
       {
         discrete: true,
@@ -157,7 +175,7 @@ export const useDocEditor = (sqlite: DataSpace | null) => {
   const getDocMarkdown = useCallback(
     async (docId: string): Promise<string> => {
       const doc = await sqlite?.doc.get(docId)
-      return _getDocMarkdown(doc?.content)
+      return _getDocMarkdown(doc?.content ?? "")
     },
     [sqlite]
   )

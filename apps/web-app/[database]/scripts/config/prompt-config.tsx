@@ -1,8 +1,11 @@
-import { useMemo } from "react"
 import { IScript } from "@/worker/web-worker/meta-table/script"
 import { ExternalLinkIcon } from "lucide-react"
+import { useMemo } from "react"
 import { Link, useLoaderData, useRevalidator } from "react-router-dom"
 
+import { useAIConfigStore } from "@/apps/web-app/settings/ai/store"
+import { AIModelSelect } from "@/components/ai-chat/ai-chat-model-select"
+import { AppendList } from "@/components/eui/append-list"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -12,13 +15,10 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { useToast } from "@/components/ui/use-toast"
-import { AIModelSelect } from "@/components/ai-chat/ai-chat-model-select"
-import { AppendList } from "@/components/eui/append-list"
-import { useAIConfigStore } from "@/apps/web-app/settings/ai/store"
-import { useConfigStore } from "@/apps/web-app/settings/store"
 
 import { useAllScripts } from "../hooks/use-all-scripts"
 import { useScript } from "../hooks/use-script"
+import { useTranslation } from "react-i18next"
 
 const ExtActions = ({ value }: any) => {
   return (
@@ -34,6 +34,7 @@ const ExtActions = ({ value }: any) => {
   )
 }
 export const PromptConfig = () => {
+  const { t } = useTranslation()
   const script = useLoaderData() as IScript
   const { updateScript } = useScript()
   const revalidator = useRevalidator()
@@ -96,12 +97,12 @@ export const PromptConfig = () => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Prompt Config</CardTitle>
-        <CardDescription>Select a model for this prompt</CardDescription>
+        <CardTitle>{t("extension.config.promptConfig")}</CardTitle>
+        <CardDescription>{t("extension.config.promptConfigDescription")}</CardDescription>
       </CardHeader>
       <CardContent>
         <div className="mt-2 grid max-w-[400px] grid-cols-7 items-start gap-4">
-          <div className="col-span-2">Model</div>
+          <div className="col-span-2">{t("common.model")}</div>
           <div className="col-span-5">
             <AIModelSelect
               value={script.model ?? ""}
@@ -112,8 +113,8 @@ export const PromptConfig = () => {
           </div>
         </div>
         <div className="mt-2 grid max-w-[400px] grid-cols-7 items-start gap-4">
-          <div className="col-span-2">Actions</div>
-          <div className="col-span-5  justify-start">
+          <div className="col-span-2">{t("extension.config.actions")}</div>
+          <div className="col-span-5 justify-start">
             <AppendList
               list={list}
               onAppend={handleAddAction}

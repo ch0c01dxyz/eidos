@@ -3,6 +3,7 @@ import data from "@emoji-mart/data"
 import Picker from "@emoji-mart/react"
 import { init } from "emoji-mart"
 
+import { isInkServiceMode } from "@/lib/env"
 import { useNode } from "@/hooks/use-nodes"
 import { Button } from "@/components/ui/button"
 import {
@@ -10,6 +11,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import { useTranslation } from "react-i18next"
 
 init({ data })
 
@@ -45,6 +47,7 @@ export const NodeIconEditor = (props: {
   const { updateIcon } = useNode()
   const [open, setOpen] = useState(false)
 
+  const { t } = useTranslation()
   useEffect(() => {
     setIcon(props.icon)
   }, [props.icon])
@@ -60,7 +63,7 @@ export const NodeIconEditor = (props: {
     setOpen(false)
   }
 
-  if (props.disabled) {
+  if (props.disabled || isInkServiceMode) {
     // just show the icon
     return (
       <>
@@ -93,7 +96,7 @@ export const NodeIconEditor = (props: {
             size="sm"
             onClick={handleRemoveIcon}
           >
-            Remove
+            {t("common.remove")}
           </Button>
         </div>
       </PopoverContent>

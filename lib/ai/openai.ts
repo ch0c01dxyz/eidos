@@ -1,5 +1,6 @@
-import { ChatRequest, FunctionCallHandler, nanoid } from "ai"
+import { ChatRequest } from "ai"
 import OpenAI from "openai"
+import { nanoid } from "nanoid"
 
 import { IField } from "@/lib/store/interface"
 
@@ -46,15 +47,16 @@ export const getPrompt = (
   },
   useBlankPrompt = false
 ) => {
+  // Only when user have a clear intention to call functions
   let base = `You are Eidos AI, a helpful AI assistant. here is your rules:
 1. Follow the user's instructions carefully. 
 2. Respond using markdown.
-3. you can call functions the system provides Only when user have a clear intention to call functions.
+3. you can call functions the system provides when user want to query database
 4. use will refer some nodes in the document, it seems like this: <span data-node-id="af45e5d8dbe34da3bed288f99b120b8e">import data</span>
   in this example, node title is 'import data', node id is 'af45e5d8dbe34da3bed288f99b120b8e'. 
   when you response, you just use node title, for example, you can response like this: '\`import data\` successfully'. don't need to use node id.
 5. data from query which can be trusted, you can display it directly, don't need to check it. 
-6. if user want to query some data, you need to generate SQL. then user will tell you the query result. return the sql in markdown code block with language type 'sql'
+6. if user want to query some data, you need to generate SQL, then call tools.function 'sqlQuery' to query data. you sql engine is sqlite, make sure your sql is correct.
 7. answer must be simple, don't use redundant words like "ok", "got it", "please wait" etc.
 8. when user want to generate visualization, you use mermaid to generate it. return the mermaid code in code block. with language type 'mermaid'
 9. answer with user's input language. 使用用户的输入语言回答问题
@@ -86,37 +88,38 @@ ${context.currentDocMarkdown}
   return systemPrompt
 }
 
-type IGetFunctionCallHandler = (handleFunctionCall: any) => FunctionCallHandler
+type IGetFunctionCallHandler = (handleFunctionCall: any) => any
 export const getFunctionCallHandler: IGetFunctionCallHandler =
-  (handleFunctionCall: any) => async (chatMessages, functionCall) => {
-    const { name, arguments: argumentsStr } = functionCall
-    if (!name) return
-    let argumentsObj
-    try {
-      argumentsObj = argumentsStr ? JSON.parse(argumentsStr) : {}
-    } catch (error) {
-      throw new Error(`invalid arguments: ${argumentsStr}`)
-    }
-    const functionParamsSchema = functionParamsSchemaMap[name]
-    const { success } = functionParamsSchema.safeParse(argumentsObj)
-    if (!success) {
-      throw new Error(`invalid arguments: ${argumentsStr}`)
-    }
-    console.log(
-      `function_call: ${name}, arguments: ${JSON.stringify(argumentsObj)}`
-    )
-    const funCallResp = await handleFunctionCall(name, argumentsObj)
+  (handleFunctionCall: any) =>
+    async (chatMessages: any[], functionCall: any) => {
+      const { name, arguments: argumentsStr } = functionCall
+      if (!name) return
+      let argumentsObj
+      try {
+        argumentsObj = argumentsStr ? JSON.parse(argumentsStr) : {}
+      } catch (error) {
+        throw new Error(`invalid arguments: ${argumentsStr}`)
+      }
+      const functionParamsSchema = functionParamsSchemaMap[name]
+      const { success } = functionParamsSchema.safeParse(argumentsObj)
+      if (!success) {
+        throw new Error(`invalid arguments: ${argumentsStr}`)
+      }
+      console.log(
+        `function_call: ${name}, arguments: ${JSON.stringify(argumentsObj)}`
+      )
+      const funCallResp = await handleFunctionCall(name, argumentsObj)
 
-    const functionResponse: ChatRequest = {
-      messages: [
-        ...chatMessages,
-        {
-          id: nanoid(),
-          name,
-          role: "function" as const,
-          content: JSON.stringify(funCallResp),
-        },
-      ],
+      const functionResponse: ChatRequest = {
+        messages: [
+          ...chatMessages,
+          {
+            id: nanoid(),
+            name,
+            role: "function" as const,
+            content: JSON.stringify(funCallResp),
+          },
+        ],
+      }
+      return functionResponse
     }
-    return functionResponse
-  }

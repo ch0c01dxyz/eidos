@@ -16,25 +16,35 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from "@/components/ui/dropdown-menu"
+import { useTranslation } from "react-i18next"
 
 export const NodeExportContextMenu = ({ node }: { node: ITreeNode }) => {
   const { sqlite } = useSqlite()
+  const { t } = useTranslation()
 
   const exportDoc = async (docId: string) => {
     const file = await sqlite?.exportMarkdown(docId)
-    file && downloadFile(file, `${node.name || "Untitled"}.md`)
+    file &&
+      downloadFile(
+        new Blob([file], { type: "text/markdown" }),
+        `${node.name || "Untitled"}.md`
+      )
   }
 
   const exportTable = async (tableId: string) => {
     const file = await sqlite?.exportCsv(tableId)
-    file && downloadFile(file, `${node.name || "Untitled"}.csv`)
+    file &&
+      downloadFile(
+        new Blob([file], { type: "text/csv" }),
+        `${node.name || "Untitled"}.csv`
+      )
   }
   if (node.type === "table") {
     return (
       <ContextMenuSub>
         <ContextMenuSubTrigger>
           <DownloadIcon className="pr-2" />
-          Export{" "}
+          {t("common.export")}
         </ContextMenuSubTrigger>
         <ContextMenuSubContent className="w-48">
           <ContextMenuItem
@@ -53,7 +63,7 @@ export const NodeExportContextMenu = ({ node }: { node: ITreeNode }) => {
     <ContextMenuSub>
       <ContextMenuSubTrigger>
         <DownloadIcon className="pr-2" />
-        Export
+        {t("common.export")}
       </ContextMenuSubTrigger>
       <ContextMenuSubContent>
         <ContextMenuContent>
@@ -72,15 +82,24 @@ export const NodeExportContextMenu = ({ node }: { node: ITreeNode }) => {
 
 export const NodeExport = ({ node }: { node: ITreeNode }) => {
   const { sqlite } = useSqlite()
+  const { t } = useTranslation()
 
   const exportDoc = async (docId: string) => {
-    const file = await sqlite?.exportMarkdown(docId)
-    file && downloadFile(file, `${node.name || "Untitled"}.md`)
+    const md = await sqlite?.exportMarkdown(docId)
+    md &&
+      downloadFile(
+        new Blob([md], { type: "text/markdown" }),
+        `${node.name || "Untitled"}.md`
+      )
   }
 
   const exportTable = async (tableId: string) => {
     const file = await sqlite?.exportCsv(tableId)
-    file && downloadFile(file, `${node.name || "Untitled"}.csv`)
+    file &&
+      downloadFile(
+        new Blob([file], { type: "text/csv" }),
+        `${node.name || "Untitled"}.csv`
+      )
   }
 
   if (node.type === "table") {
@@ -88,7 +107,7 @@ export const NodeExport = ({ node }: { node: ITreeNode }) => {
       <DropdownMenuSub>
         <DropdownMenuSubTrigger>
           <DownloadIcon className="pr-2" />
-          Export
+          {t("common.export")}
         </DropdownMenuSubTrigger>
         <DropdownMenuSubContent className="w-48">
           <DropdownMenuItem
@@ -108,7 +127,7 @@ export const NodeExport = ({ node }: { node: ITreeNode }) => {
     <DropdownMenuSub>
       <DropdownMenuSubTrigger>
         <DownloadIcon className="pr-2" />
-        Export
+        {t("common.export")}
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="w-48">
         <DropdownMenuItem

@@ -1,32 +1,27 @@
-import {
-  Suspense,
-  lazy,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { IEmbedding } from "@/worker/web-worker/meta-table/embedding"
 import { useChat } from "ai/react"
-import { Loader2, Paintbrush, PauseIcon, RefreshCcwIcon } from "lucide-react"
-import { Link } from "react-router-dom"
+import {
+  Paintbrush,
+  PaperclipIcon,
+  PauseIcon,
+  RefreshCcwIcon,
+} from "lucide-react"
+import { useWindowSize } from "usehooks-ts"
 
-import { getFunctionCallHandler } from "@/lib/ai/openai"
 import { ITreeNode } from "@/lib/store/ITreeNode"
 import { useAppStore } from "@/lib/store/app-store"
 import { useAiConfig } from "@/hooks/use-ai-config"
 import { useAIFunctions } from "@/hooks/use-ai-functions"
-import { useCurrentNode } from "@/hooks/use-current-node"
-import { useDocEditor } from "@/hooks/use-doc-editor"
-import { useSqlite } from "@/hooks/use-sqlite"
 import { Button } from "@/components/ui/button"
+import { toast } from "@/components/ui/use-toast"
 import { useAIConfigStore } from "@/apps/web-app/settings/ai/store"
 import { useExperimentConfigStore } from "@/apps/web-app/settings/experiment/store"
 
-import { Loading } from "../loading"
-import { AIChatMessage } from "./ai-chat-message"
+import { Label } from "../ui/label"
+import { Switch } from "../ui/switch"
 import { AIModelSelect } from "./ai-chat-model-select"
+import { AIChatPromptSelect } from "./ai-chat-prompt-select"
 import { AIInputEditor } from "./ai-input-editor"
 import {
   sysPrompts,
@@ -35,28 +30,35 @@ import {
   useUserPrompts,
 } from "./hooks"
 import "./index.css"
-import { Label } from "../ui/label"
-import { ScrollArea } from "../ui/scroll-area"
-import { Switch } from "../ui/switch"
-import { AIChatPromptSelect } from "./ai-chat-prompt-select"
-import { AIChatSettings } from "./settings/ai-chat-settings"
+import { useTranslation } from "react-i18next"
+
+import { UIBlock } from "../remix-chat/components/block"
+import {
+  PreviewMessage,
+  ThinkingMessage,
+} from "../remix-chat/components/message"
+import { useScrollToBottom } from "../remix-chat/components/use-scroll-to-bottom"
+import { AIChatAttachments } from "./ai-chat-attachments"
+import { useAttachments } from "./hooks/use-attachments"
 import { useAIChatSettingsStore } from "./settings/ai-chat-settings-store"
 import { useLoadingStore, useReloadModel } from "./webllm/hooks"
 import { WEB_LLM_MODELS } from "./webllm/models"
 import { useSpeak } from "./webspeech/hooks"
 
-const Whisper = lazy(() => import("./whisper"))
-
 const promptKeys = Object.keys(sysPrompts).slice(0, 1)
 const localModels = WEB_LLM_MODELS.map((item) => `${item.model_id}`)
 
 export default function Chat() {
+  const { t } = useTranslation()
+
   const loadingRef = useRef<HTMLDivElement>(null)
+  const chatContainerRef = useRef<HTMLDivElement>(null)
 
   const { prompts } = useUserPrompts()
   const { experiment } = useExperimentConfigStore()
 
   const [withSpaceData, setWithSpaceData] = useState(experiment.enableRAG)
+  const [enableTools, setEnableTools] = useState(true) // 添加 enableTools 状态
 
   const { autoSpeak } = useAIChatSettingsStore()
   const divRef = useRef<HTMLDivElement>(null)
@@ -64,8 +66,7 @@ export default function Chat() {
   const { aiConfig } = useAIConfigStore()
   const { progress } = useLoadingStore()
 
-  const { handleFunctionCall, handleRunCode } = useAIFunctions()
-  const functionCallHandler = getFunctionCallHandler(handleFunctionCall)
+  const { handleToolsCall, handleRunCode } = useAIFunctions()
 
   const [contextNodes, setContextNodes] = useState<ITreeNode[]>([])
   const [contextEmbeddings, setContextEmbeddings] = useState<IEmbedding[]>([])
@@ -105,16 +106,35 @@ export default function Chat() {
 
   const { getConfigByModel, hasAvailableModels } = useAiConfig()
   const { messages, setMessages, reload, append, isLoading, stop } = useChat({
-    experimental_onFunctionCall: functionCallHandler as any,
+    onToolCall: async ({ toolCall }) => {
+      const res = await handleToolsCall(toolCall.toolName, toolCall.args)
+      console.log("toolCall", toolCall, res)
+      return res
+    },
     onFinish(message) {
       autoSpeak && speak(message.content, message.id)
+      scrollToBottom()
+    },
+    onError(error) {
+      console.log("error:", error)
+      toast({
+        title: error.message || t("common.error.tryAgainLater"),
+        description: t("common.error.modelLimitation"),
+      })
     },
     body: {
       ...getConfigByModel(aiModel),
       systemPrompt,
-      model: aiModel, // model@provider
+      model: aiModel,
+      useTools: enableTools, // 使用 enableTools 状态控制
     },
   })
+
+  const scrollToBottom = () => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight
+    }
+  }
 
   useEffect(() => {
     if (isLoading && loadingRef.current) {
@@ -140,10 +160,14 @@ export default function Chat() {
     } as any)
   }
 
+  const [messagesContainerRef, messagesEndRef] =
+    useScrollToBottom<HTMLDivElement>()
+
   const cleanMessages = useCallback(() => {
     setMessages([])
     setContextNodes([])
     setContextEmbeddings([])
+    setAttachments([])
   }, [setMessages])
 
   const appendHiddenMessage = useCallback(
@@ -159,71 +183,84 @@ export default function Chat() {
     [setMessages, messages]
   )
 
+  const { width: windowWidth = 1920, height: windowHeight = 1080 } =
+    useWindowSize()
+
+  const [block, setBlock] = useState<UIBlock>({
+    documentId: "init",
+    content: "",
+    title: "",
+    status: "idle",
+    isVisible: false,
+    boundingBox: {
+      top: windowHeight / 4,
+      left: windowWidth / 4,
+      width: 250,
+      height: 50,
+    },
+  })
+
+  const {
+    attachments,
+    setAttachments,
+    uploadQueue,
+    fileInputRef,
+    handleFileChange,
+  } = useAttachments()
+
   return (
     <div
-      className="relative flex h-full w-[400px] shrink-0 flex-col gap-2 overflow-auto border-l border-l-slate-400 p-2"
+      className="relative flex h-full w-full flex-col overflow-hidden"
       ref={divRef}
     >
-      <div className="flex items-center justify-center gap-2">
-        <AIChatPromptSelect
-          value={currentSysPrompt}
-          onValueChange={setCurrentSysPrompt}
-          promptKeys={promptKeys}
-          prompts={prompts}
+      <div
+        ref={messagesContainerRef}
+        className="flex min-w-0 flex-1 flex-col gap-6 overflow-auto px-2 pt-4"
+      >
+        {messages.map((message, index) => (
+          <PreviewMessage
+            key={message.id}
+            chatId={"demo"}
+            projectId={"demo"}
+            message={message}
+            block={block}
+            setBlock={setBlock}
+            isLoading={isLoading && messages.length - 1 === index}
+            vote={undefined}
+            onRegenerate={reload}
+            isLastMessage={index === messages.length - 1}
+          />
+        ))}
+
+        {isLoading &&
+          messages.length > 0 &&
+          messages[messages.length - 1].role === "user" && <ThinkingMessage />}
+
+        <div
+          ref={messagesEndRef}
+          className="h-32 w-6 shrink-0"
+          aria-hidden="true"
         />
-        <AIModelSelect
-          onValueChange={setAIModel as any}
-          value={aiModel}
-          size="xs"
-          localModels={aiConfig.localModels}
-        />
-        <AIChatSettings />
       </div>
-      <ScrollArea className="grow border-t">
-        <div className="flex grow flex-col gap-2 p-3 pb-[100px]">
-          {!hasAvailableModels && (
-            <p className="p-2">
-              you need to set up LLMs in{" "}
-              <span>
-                <Link to="/settings/ai" className="text-cyan-500">
-                  settings
-                </Link>
-              </span>{" "}
-              first
-            </p>
-          )}
-          {messages.map((message, i) => {
-            const m = message
-            if (
-              (m.role === "user" || m.role == "assistant") &&
-              m.content &&
-              !(m as any).hidden
-            ) {
-              return (
-                <AIChatMessage
-                  key={i}
-                  msgIndex={i}
-                  message={message}
-                  messages={messages}
-                  handleRunCode={handleManualRun}
-                />
-              )
-            }
-          })}
-          <div>{progress?.text}</div>
-          <div className="flex w-full justify-center">
-            {isLoading && (
-              <div ref={loadingRef}>
-                <Loader2 className="h-5 w-5 animate-spin" />
-              </div>
-            )}
-          </div>
-        </div>
-      </ScrollArea>
-      <div className="relative shrink-0">
+
+      <input
+        type="file"
+        className="pointer-events-none fixed -left-4 -top-4 size-0.5 opacity-0"
+        ref={fileInputRef}
+        multiple
+        onChange={handleFileChange}
+        tabIndex={-1}
+      />
+
+      <div className="sticky bottom-0 bg-background p-4">
+        <AIChatAttachments
+          attachments={attachments}
+          uploadQueue={uploadQueue}
+        />
+
         <div className="flex items-center justify-between">
           {experiment.enableRAG && (
-            <div className="flex min-w-[200px]  gap-2">
+            <div className="flex min-w-[200px] gap-2">
               <Switch
                 id="ai-chat-use-space-data"
                 checked={withSpaceData}
@@ -231,41 +268,72 @@ export default function Chat() {
               ></Switch>
               <Label
                 htmlFor="ai-chat-use-space-data"
-                className=" text-sm opacity-80"
+                className="text-sm opacity-80"
               >
-                talk to space data
+                {t("aiChat.inputEditor.talkToSpaceData")}
               </Label>
             </div>
           )}
-          <div className="flex  w-full items-center justify-end">
-            {isLoading && (
-              <Button onClick={stop} variant="ghost" size="sm">
-                <PauseIcon className="h-5 w-5" />
-              </Button>
-            )}
 
-            <Suspense fallback={<Loading />}>
-              <Whisper setText={setSpeechText} />
-            </Suspense>
-            <Button
-              variant="ghost"
-              onClick={() => reload()}
-              size="sm"
-              disabled={isLoading}
-            >
-              <RefreshCcwIcon className="h-5 w-5" />
-            </Button>
-            <Button variant="ghost" onClick={cleanMessages} size="sm">
-              <Paintbrush className="h-5 w-5" />
-            </Button>
-            {/* <Button variant="ghost" size="sm">
-              <SendIcon className="h-5 w-5 opacity-60"></SendIcon>
-            </Button> */}
+          <div className="flex w-full flex-col">
+            <div className="flex min-w-[200px] items-center justify-end gap-2">
+              <Label htmlFor="ai-chat-use-tools" className="text-sm opacity-80">
+                {t("aiChat.inputEditor.useTools")}
+              </Label>
+              <Switch
+                id="ai-chat-use-tools"
+                checked={enableTools}
+                onCheckedChange={setEnableTools}
+              ></Switch>
+            </div>
+            <div className="flex w-full items-center justify-between gap-2">
+              <div className="flex items-center gap-1">
+                <AIChatPromptSelect
+                  value={currentSysPrompt}
+                  onValueChange={setCurrentSysPrompt}
+                  promptKeys={promptKeys}
+                  prompts={prompts}
+                />
+                <AIModelSelect
+                  onValueChange={setAIModel as any}
+                  value={aiModel}
+                  size="xs"
+                  className="max-w-[150px]"
+                  localModels={aiConfig.localModels}
+                />
+              </div>
+              <div className="flex items-center gap-1">
+                {isLoading && (
+                  <Button onClick={stop} variant="ghost" size="sm">
+                    <PauseIcon className="h-5 w-5" />
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isLoading}
+                >
+                  <PaperclipIcon className="h-5 w-5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => reload()}
+                  size="sm"
+                  disabled={isLoading}
+                >
+                  <RefreshCcwIcon className="h-5 w-5" />
+                </Button>
+                <Button variant="ghost" onClick={cleanMessages} size="sm">
+                  <Paintbrush className="h-5 w-5" />
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
         <div
           id="circle"
-          className=" absolute right-0 top-0 z-10 ml-0 h-1 rounded-sm bg-green-300 opacity-50"
+          className="absolute right-0 top-0 z-10 ml-0 h-1 rounded-sm bg-green-300 opacity-50"
         ></div>
         <AIInputEditor
           enableRAG={withSpaceData}
@@ -275,6 +343,9 @@ export default function Chat() {
           append={append}
           appendHiddenMessage={appendHiddenMessage}
           isLoading={isLoading}
+          attachments={attachments}
+          setAttachments={setAttachments}
+          uploadQueue={uploadQueue}
         />
       </div>
     </div>

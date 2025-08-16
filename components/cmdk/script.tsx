@@ -4,9 +4,10 @@ import { useKeyPress } from "ahooks"
 
 import { ActionExecutor } from "@/lib/action/action"
 import { useAppRuntimeStore } from "@/lib/store/runtime-store"
+import { useAllExtensions } from "@/hooks/use-all-extensions"
 import { useCurrentNode } from "@/hooks/use-current-node"
 import { useCurrentPathInfo } from "@/hooks/use-current-pathinfo"
-import { useAllExtensions } from "@/hooks/use-all-extensions"
+import { useTableViews } from "@/hooks/use-table"
 
 import { CommandDialogDemo } from "."
 import { useScriptFunction } from "../script-container/hook"
@@ -30,10 +31,11 @@ export const ScriptList = () => {
   const { space, tableId, viewId } = useCurrentPathInfo()
   const currentNode = useCurrentNode()
   const _scripts = useAllExtensions(space)
+  const views = useTableViews(tableId!)
 
   const scripts = useMemo(() => {
     return _scripts.filter((script) => {
-      return script.type === "script"
+      return script.type === "script" || script.type === "py_script"
     })
   }, [_scripts])
 
@@ -66,10 +68,11 @@ export const ScriptList = () => {
     }, 0)
   }, [])
 
-  useKeyPress("Enter", () => {
+  useKeyPress("Enter", async () => {
     if (currentAction) {
       console.log("executing command: " + input)
       const realParams: Record<string, any> = ActionExecutor.getParams(input)
+      const view = viewId ? views.find((v) => v.id === viewId) : views[0]
       callFunction({
         input: realParams,
         command: currentCommand?.name || "default",
@@ -78,9 +81,15 @@ export const ScriptList = () => {
           env: currentAction.env_map || {},
           currentNodeId: currentNode?.id,
           currentViewId: viewId,
+          currentViewQuery: view?.query,
         },
         code: currentAction.code,
         id: currentAction.id,
+        bindings: currentAction.bindings,
+        type: currentAction.type,
+        dependencies: currentAction.dependencies,
+      }).then((res) => {
+        console.log("res", res)
       })
       setInput("")
       setCmdkOpen(false)

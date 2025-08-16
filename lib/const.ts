@@ -60,7 +60,8 @@ export enum DataUpdateSignalType {
 
 export const EidosDataEventChannelName = "eidos-data-event"
 export const EidosSharedEnvChannelName = "eidos-shared-env"
-
+export const EidosMessageChannelName = "eidos-message"
+export const EidosProtocolUrlChannelName = "eidos-protocol-url"
 // TODO: replace hard-coded link
 export const DOMAINS = {
   IMAGE_PROXY: "https://proxy.eidos.space",
@@ -70,6 +71,7 @@ export const DOMAINS = {
   EXTENSION_SERVER: "https://ext.eidos.space",
   API_AGENT_SERVER: "https://api.eidos.space",
   DISCORD_INVITE: "https://discord.gg/bsGMPDR23b",
+  GITHUB_ISSUES: "https://github.com/mayneyao/eidos/issues/",
 }
 
 // custom Event, dispatch via window

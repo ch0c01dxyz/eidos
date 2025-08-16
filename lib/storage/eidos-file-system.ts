@@ -1,5 +1,7 @@
+import { isDesktopMode } from "../env"
 import { extension } from "../mime/mime"
 import { getIndexedDBValue } from "./indexeddb"
+
 
 export enum FileSystemType {
   OPFS = "opfs",
@@ -8,6 +10,7 @@ export enum FileSystemType {
 
 export const getFsRootHandle = async (fsType: FileSystemType) => {
   let dirHandle: FileSystemDirectoryHandle
+
   switch (fsType) {
     case FileSystemType.NFS:
       // how it works https://developer.chrome.com/blog/persistent-permissions-for-the-file-system-access-api
@@ -29,6 +32,15 @@ export const getExternalFolderHandle = async (name: string) => {
   const dirHandle = externalFolders.find((dir) => dir.name === name)
   return dirHandle
 }
+
+
+const adapterSymbol = Symbol('adapter');
+
+function hasAdapterSymbol(obj: any): boolean {
+  const symbols = Object.getOwnPropertySymbols(obj);
+  return symbols.some(symbol => symbol.toString() === adapterSymbol.toString());
+}
+
 
 /**
  * get DirHandle for a given path list
@@ -84,6 +96,14 @@ export class EidosFileSystemManager {
     if (rootDirHandle) {
       this.rootDirHandle = rootDirHandle
     }
+  }
+
+  isSameEntry = async (dirHandle: FileSystemDirectoryHandle) => {
+    return this.rootDirHandle?.isSameEntry(dirHandle)
+  }
+
+  getDirHandle = async (paths: string[]) => {
+    return getDirHandle(paths, this.rootDirHandle)
   }
 
   walk = async (_paths: string[]): Promise<string[][]> => {
@@ -243,7 +263,7 @@ export class EidosFileSystemManager {
   }
 
   getFile = async (_paths: string[], options?: FileSystemGetFileOptions) => {
-    const paths = [..._paths]
+    const paths = [..._paths.filter(Boolean)]
     if (paths.length === 0) {
       throw new Error("paths can't be empty")
     }
@@ -252,6 +272,11 @@ export class EidosFileSystemManager {
     const fileHandle = await dirHandle.getFileHandle(filename!, options)
     const file = await fileHandle.getFile()
     return file
+  }
+
+  getFileText = async (_paths: string[]) => {
+    const file = await this.getFile(_paths)
+    return await file.text()
   }
 
   getDocContent = async (_paths: string[]) => {
@@ -276,6 +301,7 @@ export class EidosFileSystemManager {
       throw new Error("paths can't be empty")
     }
     const dirHandle = await getDirHandle(paths, this.rootDirHandle)
+    console.log("dirHandle", dirHandle)
     // if fileId is provided, use it as file name
     const fileExt = extension(file.type)
     const filename = fileId ? `${fileId}.${fileExt}` : file.name
@@ -288,6 +314,7 @@ export class EidosFileSystemManager {
     // fileHandle get path
     const rootDirHandle = await getDirHandle([], this.rootDirHandle)
     const relativePath = await rootDirHandle.resolve(fileHandle)
+    console.log("relativePath", { rootDirHandle, fileHandle, relativePath })
     return relativePath
   }
 
@@ -324,7 +351,7 @@ export class EidosFileSystemManager {
 }
 
 // deprecated
-export const efsManager = new EidosFileSystemManager()
+export const efsManager = isDesktopMode ? new EidosFileSystemManager() : new EidosFileSystemManager()
 
 export const getExternalFolderManager = async (name: string) => {
   const dirHandler = await getExternalFolderHandle(name)

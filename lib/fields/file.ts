@@ -31,7 +31,8 @@ export class FileField extends BaseField<FileCell, FileProperty, string> {
   getProxyData = (data: string[]) => {
     if (this.column.property?.proxyUrl) {
       const proxyUrl = this.column.property?.proxyUrl
-      return data.map((d) => {
+      return data.map((_d) => {
+        const d = _d.trim()
         const fileType = getFileType(d)
         // show only image
         if (fileType !== "image") {
@@ -54,7 +55,7 @@ export class FileField extends BaseField<FileCell, FileProperty, string> {
   }
 
   getCellContent(rawData: string): FileCell {
-    const data = rawData?.split(",") ?? []
+    const data = rawData?.split(",").filter(Boolean) ?? []
     return {
       kind: GridCellKind.Custom,
       data: {

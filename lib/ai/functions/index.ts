@@ -7,14 +7,16 @@ import createQuickAction from "./quick-action"
 import { startRecorder, stopRecorder } from "./recorder"
 import saveFile2EFS from "./save-file"
 import sqlQuery from "./sql-query"
+import createTable from "./create-table"
 
-const allFunctions = [
+export const allFunctions = [
   sqlQuery,
   createDoc,
   // createQuickAction,
   startRecorder,
   stopRecorder,
   saveFile2EFS,
+  createTable,
 ]
 
 export const functions = allFunctions.map((f) => {

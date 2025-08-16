@@ -32,13 +32,12 @@ import {
 import {
   AudioLinesIcon,
   BaselineIcon,
-  BookMarkedIcon,
   CaseSensitiveIcon,
   CodeIcon,
+  FileQuestionIcon,
   Heading1Icon,
   Heading2Icon,
   Heading3Icon,
-  ImageIcon,
   ListChecksIcon,
   ListIcon,
   ListOrderedIcon,
@@ -46,25 +45,22 @@ import {
   QuoteIcon,
   SheetIcon,
   SparklesIcon,
+  TableIcon,
   VariableIcon,
   icons,
 } from "lucide-react"
 import * as ReactDOM from "react-dom"
+import { useTranslation } from "react-i18next"
 
 import { cn } from "@/lib/utils"
-import { TocIcon } from "@/components/icons/toc"
 
-import { useModal } from "../../hooks/useModal"
-import { SelectDatabaseTableDialog } from "../DatabasePlugin/SelectDatabaseTableDialog"
-import { SqlQueryDialog } from "../SQLPlugin/SqlQueryDialog"
-import { bgColors, fgColors } from "../const"
-import "./index.css"
 import { BuiltInBlocks } from "../../blocks"
 import { useExtBlocks } from "../../hooks/use-ext-blocks"
-import { INSERT_BOOKMARK_COMMAND } from "../BookmarkPlugin"
-import { INSERT_IMAGE_COMMAND } from "../ImagesPlugin"
-import { INSERT_TOC_COMMAND } from "../TableOfContentsPlugin"
+import { useModal } from "../../hooks/useModal"
+import { bgColors, fgColors } from "../const"
 import { useBasicTypeaheadTriggerMatch } from "./hook"
+import "./index.css"
+import { useKeyPress } from "ahooks"
 
 const IconMap: Record<string, JSX.Element> = {
   h1: <Heading1Icon className="h-5 w-5" />,
@@ -76,13 +72,12 @@ const IconMap: Record<string, JSX.Element> = {
   cl: <ListChecksIcon className="h-5 w-5" />,
   quote: <QuoteIcon className="h-5 w-5" />,
   code: <CodeIcon className="h-5 w-5" />,
-  image: <ImageIcon className="h-5 w-5" />,
   audio: <AudioLinesIcon className="h-5 w-5" />,
   database: <SheetIcon className="h-5 w-5" />,
   text: <CaseSensitiveIcon className="h-5 w-5" />,
   hr: <MinusSquareIcon className="h-5 w-5" />,
   sql: <VariableIcon className="h-5 w-5" />,
-  bookmark: <BookMarkedIcon className="h-5 w-5" />,
+  table: <TableIcon className="h-5 w-5" />,
 }
 
 class ComponentPickerOption extends MenuOption {
@@ -155,6 +150,7 @@ function ComponentPickerMenuItem({
 }
 
 export function ComponentPickerMenuPlugin(): JSX.Element {
+  const { t } = useTranslation()
   const [editor] = useLexicalComposerContext()
   const [modal, showModal] = useModal()
   const [queryString, setQueryString] = useState<string | null>(null)
@@ -183,13 +179,19 @@ export function ComponentPickerMenuPlugin(): JSX.Element {
         .map((n: string) => parseInt(n, 10))
 
       options.push(
-        new ComponentPickerOption(`${rows}x${columns} Table`, {
-          icon: <i className="icon table" />,
-          keywords: ["table"],
-          onSelect: () =>
-            // @ts-ignore Correct types, but since they're dynamic TS doesn't like it.
-            editor.dispatchCommand(INSERT_TABLE_COMMAND, { columns, rows }),
-        })
+        new ComponentPickerOption(
+          t("doc.menu.insertTable", { rows, columns }),
+          {
+            icon: <TableIcon className="h-5 w-5" />,
+            keywords: ["table"],
+            onSelect: () =>
+              editor.dispatchCommand(INSERT_TABLE_COMMAND, {
+                columns: columns.toString(),
+                rows: rows.toString(),
+                includeHeaders: false,
+              }),
+          }
+        )
       )
     } else if (partialTableMatch) {
       const rows = parseInt(partialTableMatch[0], 10)
@@ -197,28 +199,29 @@ export function ComponentPickerMenuPlugin(): JSX.Element {
       options.push(
         ...Array.from({ length: 5 }, (_, i) => i + 1).map(
           (columns) =>
-            new ComponentPickerOption(`${rows}x${columns} Table`, {
-              icon: <i className="icon table" />,
-              keywords: ["table"],
-              onSelect: () =>
-                // @ts-ignore Correct types, but since they're dynamic TS doesn't like it.
-                editor.dispatchCommand(INSERT_TABLE_COMMAND, { columns, rows }),
-            })
+            new ComponentPickerOption(
+              t("doc.menu.insertTable", { rows, columns }),
+              {
+                icon: <TableIcon className="h-5 w-5" />,
+                keywords: ["table"],
+                onSelect: () =>
+                  editor.dispatchCommand(INSERT_TABLE_COMMAND, {
+                    columns: columns.toString(),
+                    rows: rows.toString(),
+                    includeHeaders: false,
+                  }),
+              }
+            )
         )
       )
     }
 
     return options
-  }, [editor, queryString])
+  }, [editor, queryString, t])
 
   const options = useMemo(() => {
     const baseOptions = [
-      // new ComponentPickerOption("AI Complete", {
-      //   icon: IconMap["ai"],
-      //   keywords: ["ai", "auto"],
-      //   onSelect: () => editor.dispatchCommand(AI_COMPLETE_COMMAND, ""),
-      // }),
-      new ComponentPickerOption("Paragraph", {
+      new ComponentPickerOption(t("doc.menu.paragraph"), {
         icon: IconMap["text"],
         keywords: ["normal", "paragraph", "p", "text"],
         onSelect: () =>
@@ -231,7 +234,7 @@ export function ComponentPickerMenuPlugin(): JSX.Element {
       }),
       ...Array.from({ length: 3 }, (_, i) => i + 1).map(
         (n) =>
-          new ComponentPickerOption(`Heading ${n}`, {
+          new ComponentPickerOption(t("doc.menu.heading", { n }), {
             icon: IconMap[`h${n}`],
             keywords: ["heading", "header", `h${n}`],
             onSelect: () =>
@@ -246,25 +249,25 @@ export function ComponentPickerMenuPlugin(): JSX.Element {
               }),
           })
       ),
-      new ComponentPickerOption("Numbered List", {
+      new ComponentPickerOption(t("doc.menu.numberedList"), {
         icon: IconMap["lo"],
         keywords: ["numbered list", "ordered list", "ol"],
         onSelect: () =>
           editor.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined),
       }),
-      new ComponentPickerOption("Bulleted List", {
+      new ComponentPickerOption(t("doc.menu.bulletedList"), {
         icon: IconMap["ul"],
         keywords: ["bulleted list", "unordered list", "ul"],
         onSelect: () =>
           editor.dispatchCommand(INSERT_UNORDERED_LIST_COMMAND, undefined),
       }),
-      new ComponentPickerOption("Check List", {
+      new ComponentPickerOption(t("doc.menu.checkList"), {
         icon: IconMap["cl"],
         keywords: ["check list", "todo list"],
         onSelect: () =>
           editor.dispatchCommand(INSERT_CHECK_LIST_COMMAND, undefined),
       }),
-      new ComponentPickerOption("Quote", {
+      new ComponentPickerOption(t("doc.menu.quote"), {
         icon: IconMap["quote"],
         keywords: ["block quote"],
         onSelect: () =>
@@ -275,7 +278,7 @@ export function ComponentPickerMenuPlugin(): JSX.Element {
             }
           }),
       }),
-      new ComponentPickerOption("Code", {
+      new ComponentPickerOption(t("doc.menu.code"), {
         icon: IconMap["code"],
         keywords: ["javascript", "python", "js", "codeblock"],
         onSelect: () =>
@@ -286,7 +289,6 @@ export function ComponentPickerMenuPlugin(): JSX.Element {
               if (selection.isCollapsed()) {
                 $setBlocksType(selection, () => $createCodeNode())
               } else {
-                // Will this ever happen?
                 const textContent = selection.getTextContent()
                 const codeNode = $createCodeNode()
                 selection.insertNodes([codeNode])
@@ -295,85 +297,33 @@ export function ComponentPickerMenuPlugin(): JSX.Element {
             }
           }),
       }),
-      new ComponentPickerOption("Divider", {
+      new ComponentPickerOption(t("doc.menu.divider"), {
         icon: IconMap["hr"],
         keywords: ["horizontal rule", "divider", "hr"],
         onSelect: () =>
           editor.dispatchCommand(INSERT_HORIZONTAL_RULE_COMMAND, undefined),
       }),
-
-      new ComponentPickerOption("Image", {
-        icon: IconMap["image"],
-        keywords: ["image", "img"],
+      new ComponentPickerOption(t("doc.menu.table"), {
+        icon: IconMap["table"],
+        keywords: ["table"],
         onSelect: () =>
-          editor.dispatchCommand(INSERT_IMAGE_COMMAND, {
-            src: "",
-            altText: "",
+          editor.dispatchCommand(INSERT_TABLE_COMMAND, {
+            columns: "3",
+            rows: "3",
+            includeHeaders: false,
           }),
       }),
-
-      ...BuiltInBlocks.map((block) => {
+      ...BuiltInBlocks.filter((block) => !block.hiddenInMenu).map((block) => {
         const iconName = block.icon
-        const BlockIcon = (icons as any)[iconName]
+        const BlockIcon = (icons as any)[iconName] ?? FileQuestionIcon
         return new ComponentPickerOption(block.name, {
           icon: <BlockIcon className="h-5 w-5" />,
           keywords: block.keywords,
           onSelect: () => block.onSelect(editor),
         })
       }),
-
-      new ComponentPickerOption("Bookmark", {
-        icon: IconMap["bookmark"],
-        keywords: ["bookmark"],
-        onSelect: () =>
-          editor.dispatchCommand(INSERT_BOOKMARK_COMMAND, {
-            url: "",
-          }),
-      }),
-
-      new ComponentPickerOption("Table Of Content", {
-        icon: <TocIcon />,
-        keywords: ["table of content", "toc"],
-        onSelect: () => editor.dispatchCommand(INSERT_TOC_COMMAND, undefined),
-      }),
-
-      new ComponentPickerOption("Query", {
-        icon: IconMap["sql"],
-        keywords: ["query", "sql"],
-        onSelect: () =>
-          showModal("Insert SqlQuery", (onClose) => (
-            <SqlQueryDialog activeEditor={editor} onClose={onClose} />
-          )),
-      }),
-
-      new ComponentPickerOption("DatabaseTable", {
-        icon: IconMap["database"],
-        keywords: ["database", "table"],
-        disabled: true,
-        onSelect: () => {
-          // disable for now
-          return
-          showModal("Insert Database Table", (onClose) => (
-            <SelectDatabaseTableDialog
-              activeEditor={editor}
-              onClose={onClose}
-            />
-          ))
-        },
-      }),
-
-      // ...["left", "center", "right", "justify"].map(
-      //   (alignment) =>
-      //     new ComponentPickerOption(`Align ${alignment}`, {
-      //       icon: <i className={`icon ${alignment}-align`} />,
-      //       keywords: ["align", "justify", alignment],
-      //       onSelect: () =>
-      //         // @ts-ignore Correct types, but since they're dynamic TS doesn't like it.
-      //         editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, alignment),
-      //     })
-      // ),
       ...bgColors.map(({ name, value }) => {
-        return new ComponentPickerOption(`Background ${name}`, {
+        return new ComponentPickerOption(t("doc.menu.background", { name }), {
           icon: (
             <BaselineIcon
               style={{ backgroundColor: value }}
@@ -398,7 +348,7 @@ export function ComponentPickerMenuPlugin(): JSX.Element {
         })
       }),
       ...fgColors.map(({ name, value }) => {
-        return new ComponentPickerOption(`Color ${name}`, {
+        return new ComponentPickerOption(t("doc.menu.color", { name }), {
           icon: <BaselineIcon style={{ color: value }} className="h-5 w-5" />,
           keywords: ["color", name],
           onSelect: () =>
@@ -426,17 +376,6 @@ export function ComponentPickerMenuPlugin(): JSX.Element {
           onSelect: () => block.onSelect(editor),
         })
       }),
-
-      // ...["left", "center", "right", "justify"].map(
-      //   (alignment) =>
-      //     new ComponentPickerOption(`Align ${alignment}`, {
-      //       icon: <i className={`icon ${alignment}-align`} />,
-      //       keywords: ["align", "justify", alignment],
-      //       onSelect: () =>
-      //         // @ts-ignore Correct types, but since they're dynamic TS doesn't like it.
-      //         editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, alignment),
-      //     })
-      // ),
     ]
 
     const dynamicOptions = getDynamicOptions()
@@ -454,7 +393,25 @@ export function ComponentPickerMenuPlugin(): JSX.Element {
           }),
         ]
       : baseOptions
-  }, [editor, extBlocks, getDynamicOptions, queryString, showModal])
+  }, [editor, extBlocks, getDynamicOptions, queryString, showModal, t])
+
+  useKeyPress("esc", () => {
+    editor.update(() => {
+      const selection = $getSelection()
+      if ($isRangeSelection(selection)) {
+        const anchor = selection.anchor
+        const node = anchor.getNode()
+        if ($isTextNode(node)) {
+          const textContent = node.getTextContent()
+          const lastChar = textContent[anchor.offset - 1]
+          if (lastChar === "/" || lastChar === "、") {
+            node.spliceText(anchor.offset - 1, 1, "")
+          }
+        }
+      }
+    })
+    setQueryString(null)
+  })
 
   const onSelectOption = useCallback(
     (
@@ -482,11 +439,14 @@ export function ComponentPickerMenuPlugin(): JSX.Element {
         onSelectOption={onSelectOption}
         triggerFn={checkForTriggerMatch}
         options={options}
+        onClose={() => {
+          setQueryString(null)
+        }}
         menuRenderFn={(
           anchorElementRef,
           { selectedIndex, selectOptionAndCleanUp, setHighlightedIndex }
-        ) =>
-          anchorElementRef.current && options.length
+        ) => {
+          return anchorElementRef.current && options.length
             ? ReactDOM.createPortal(
                 <div className="typeahead-popover component-picker-menu">
                   <ul>
@@ -510,7 +470,7 @@ export function ComponentPickerMenuPlugin(): JSX.Element {
                 anchorElementRef.current
               )
             : null
-        }
+        }}
       />
     </>
   )

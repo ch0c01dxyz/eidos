@@ -1,14 +1,13 @@
-import { dir } from "console"
 import { useCallback, useEffect } from "react"
 import { create } from "zustand"
 
-import { efsManager } from "@/lib/storage/eidos-file-system"
+import { toast } from "@/components/ui/use-toast"
+import { useEidosFileSystemManager } from "@/hooks/use-fs"
 import {
   getPackageJsonFromZipFile,
   unZipFileToDir,
 } from "@/lib/storage/zip-file"
 import { nonNullable } from "@/lib/utils"
-import { toast } from "@/components/ui/use-toast"
 
 interface ExtensionType {
   id: string
@@ -29,8 +28,7 @@ export const useExtensionStore = create<ExtensionsState>()((set) => ({
 }))
 
 // get ext info from package.json file
-export const getExtInfo = async (file: File): Promise<ExtensionType | null> => {
-  const packageJsonText = await file.text()
+export const getExtInfo = async (packageJsonText: string): Promise<ExtensionType | null> => {
   try {
     const packageJsonObj = JSON.parse(packageJsonText)
     const { id, name, version, description, displayMode } =
@@ -44,14 +42,14 @@ export const getExtInfo = async (file: File): Promise<ExtensionType | null> => {
 export const useExtensions = () => {
   const { extensions, setExtensions } = useExtensionStore()
 
+  const { efsManager } = useEidosFileSystemManager()
   const getExtensionIndex = async (name: string) => {
-    const file = await efsManager.getFile([
+    const text = await efsManager.getDocContent([
       "extensions",
       "apps",
       name,
       "index.html",
     ])
-    const text = await file.text()
     return text
   }
 
@@ -61,7 +59,7 @@ export const useExtensions = () => {
       extensionDirs
         .filter((dir) => !dir.name.startsWith("."))
         .map(async (dir) => {
-          const packageJson = await efsManager.getFile([
+          const packageJson = await efsManager.getFileText([
             "extensions",
             "apps",
             dir.name,
@@ -104,9 +102,11 @@ export const useExtensions = () => {
   ) => {
     let parentPath = _parentPath || ["extensions", "apps"]
     if (!_parentPath) {
-      const packageJsonHandle = await dirHandle.getFileHandle("package.json")
-      const packageJsonFile = await packageJsonHandle.getFile()
-      const extensionInfo = await getExtInfo(packageJsonFile)
+      const packageJsonText = await efsManager.getFileText([
+        ...parentPath,
+        "package.json",
+      ])
+      const extensionInfo = await getExtInfo(packageJsonText)
       if (!extensionInfo) {
         toast({
           title: "Invalid extension package.json",

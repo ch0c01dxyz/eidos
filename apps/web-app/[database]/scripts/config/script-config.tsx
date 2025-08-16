@@ -26,8 +26,11 @@ import { getRawTableNameById } from "@/lib/utils"
 
 import { useTablesUiColumns } from "../hooks/use-all-table-fields"
 import { useScript } from "../hooks/use-script"
+import { Bindings } from "./Bindings"
+import { useTranslation } from "react-i18next"
 
 export const ScriptConfig = () => {
+  const { t } = useTranslation()
   const script = useLoaderData() as IScript
   const allNodes = useAllNodes()
   const allTables = allNodes.filter((node) => node.type === "table")
@@ -42,23 +45,36 @@ export const ScriptConfig = () => {
   const revalidator = useRevalidator()
   const { toast } = useToast()
 
+  const [bindings, setBindings] = useState<
+    Record<string, { type: "table"; value: string }>
+  >(script.bindings || {})
+
+  const [dependencies, setDependencies] = useState<string[]>(
+    script.dependencies || []
+  )
+  const [newDependency, setNewDependency] = useState("")
+
   const tables = useMemo(() => {
     return Object.values(fieldsMap || {}).map((fieldMap) => fieldMap.name)
   }, [fieldsMap])
   const { uiColumnsMap } = useTablesUiColumns(tables, space)
   const { updateScript } = useScript()
-  const handleSave = async () => {
+
+  const handleUpdateBindings = async (
+    newBindings: Record<string, { type: "table"; value: string }>
+  ) => {
+    setBindings(newBindings)
     await updateScript({
       ...script,
-      fields_map: fieldsMap,
-      env_map: envMap,
+      bindings: newBindings,
     })
     revalidator.revalidate()
     toast({
-      title: "Script Updated Successfully",
+      title: "Bindings Updated Successfully",
     })
   }
-  const handleTableChange = (tableName: string, tableId: string) => {
+
+  const handleTableChange = async (tableName: string, tableId: string) => {
     const newFieldsMap = {
       ...fieldsMap,
       [tableName]: {
@@ -70,9 +86,21 @@ export const ScriptConfig = () => {
       },
     }
     setFieldsMap(newFieldsMap)
+    
+    // Auto save after change
+    await updateScript({
+      ...script,
+      fields_map: newFieldsMap,
+      env_map: envMap,
+      dependencies: script.type === "py_script" ? dependencies : undefined,
+    })
+    revalidator.revalidate()
+    toast({
+      title: "Script Updated Successfully",
+    })
   }
 
-  const handleFieldChange = (
+  const handleFieldChange = async (
     tableName: string,
     fieldName: string,
     value: string
@@ -88,6 +116,76 @@ export const ScriptConfig = () => {
       },
     }
     setFieldsMap(newFieldsMap)
+
+    // Auto save after change
+    await updateScript({
+      ...script,
+      fields_map: newFieldsMap,
+      env_map: envMap,
+      dependencies: script.type === "py_script" ? dependencies : undefined,
+    })
+    revalidator.revalidate()
+    toast({
+      title: "Script Updated Successfully",
+    })
+  }
+
+  const handleAddDependency = async () => {
+    if (newDependency.trim()) {
+      const newDependencies = [...dependencies, newDependency.trim()]
+      setDependencies(newDependencies)
+      setNewDependency("")
+
+      // Auto save after adding dependency
+      await updateScript({
+        ...script,
+        fields_map: fieldsMap,
+        env_map: envMap,
+        dependencies: script.type === "py_script" ? newDependencies : undefined,
+      })
+      revalidator.revalidate()
+      toast({
+        title: "Script Updated Successfully",
+      })
+    }
+  }
+
+  const handleRemoveDependency = async (index: number) => {
+    const newDependencies = dependencies.filter((_, i) => i !== index)
+    setDependencies(newDependencies)
+
+    // Auto save after removing dependency
+    await updateScript({
+      ...script,
+      fields_map: fieldsMap,
+      env_map: envMap,
+      dependencies: script.type === "py_script" ? newDependencies : undefined,
+    })
+    revalidator.revalidate()
+    toast({
+      title: "Script Updated Successfully",
+    })
+  }
+
+  // Add new handler for env changes
+  const handleEnvChange = async (envName: string, value: string) => {
+    const newEnvMap = {
+      ...envMap,
+      [envName]: value,
+    }
+    setEnvMap(newEnvMap)
+
+    // Auto save after env change
+    await updateScript({
+      ...script,
+      fields_map: fieldsMap,
+      env_map: newEnvMap,
+      dependencies: script.type === "py_script" ? dependencies : undefined,
+    })
+    revalidator.revalidate()
+    toast({
+      title: "Script Updated Successfully",
+    })
   }
 
   return (
@@ -95,8 +193,8 @@ export const ScriptConfig = () => {
       {Boolean(script.tables?.length) && (
         <Card>
           <CardHeader>
-            <CardTitle>Table Map</CardTitle>
-            <CardDescription>This script need to bind tables</CardDescription>
+            <CardTitle>{t("extension.config.tableMap")}</CardTitle>
+            <CardDescription>{t("extension.config.tableMapDescription")}</CardDescription>
           </CardHeader>
           <CardContent>
             {script.tables?.map((table) => {
@@ -112,13 +210,13 @@ export const ScriptConfig = () => {
                       }
                     >
                       <SelectTrigger className="w-[180px]">
-                        <SelectValue placeholder="Bind Table" />
+                        <SelectValue placeholder={t("extension.config.bindTable")} />
                       </SelectTrigger>
                       <SelectContent>
                         {allTables.map((table) => {
                           return (
                             <SelectItem value={table.id} key={table.id}>
-                              {table.name || "Untitled"}
+                              {table.name || t("common.untitled")}
                             </SelectItem>
                           )
                         })}
@@ -127,7 +225,9 @@ export const ScriptConfig = () => {
                   </div>
                   {fieldsMap?.[table.name] && (
                     <div className="ml-8">
-                      <h2 className="mb-2 text-lg font-medium">Field Map</h2>
+                      <h2 className="mb-2 text-lg font-medium">
+                        {t("extension.config.fieldMap")}
+                      </h2>
                       {table.fields.map((field) => {
                         return (
                           <div key={field.name}>
@@ -179,13 +279,14 @@ export const ScriptConfig = () => {
           </CardContent>
         </Card>
       )}
+
       {Boolean(script.envs?.length) && (
         <>
           <Card>
             <CardHeader>
-              <CardTitle>Environment Variables</CardTitle>
+              <CardTitle>{t("extension.config.environmentVariables")}</CardTitle>
               <CardDescription>
-                This script need to configure environment variables
+                {t("extension.config.scriptNeedsEnvVars")}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -200,12 +301,7 @@ export const ScriptConfig = () => {
                       <Input
                         className="w-[200px]"
                         value={envMap?.[env.name] ?? ""}
-                        onChange={(e) => {
-                          setEnvMap({
-                            ...envMap,
-                            [env.name]: e.target.value,
-                          })
-                        }}
+                        onChange={(e) => handleEnvChange(env.name, e.target.value)}
                         disabled={env.readonly}
                       />
                     </div>
@@ -217,9 +313,70 @@ export const ScriptConfig = () => {
         </>
       )}
 
-      <div className="mt-4">
-        <Button onClick={handleSave}>Update</Button>
-      </div>
+      {script.type === "py_script" && (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("extension.config.dependencies")}</CardTitle>
+            <CardDescription>
+              {t("extension.config.dependenciesDescription")}
+              <div className="mt-2 text-sm">
+                <p>
+                  {t("extension.config.dependenciesBuiltInNote")}{" "}
+                  <a
+                    href="https://pyodide.org/en/stable/usage/packages-in-pyodide.html"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline"
+                  >
+                    {t("extension.config.dependenciesBuiltInLink")}
+                  </a>
+                </p>
+                <p className="mt-1">
+                  {t("extension.config.dependenciesPyPINote")}
+                </p>
+              </div>
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-4">
+              <div className="flex gap-2">
+                <Input
+                  placeholder={t("extension.config.dependencyPlaceholder")}
+                  value={newDependency}
+                  onChange={(e) => setNewDependency(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      handleAddDependency()
+                    }
+                  }}
+                />
+                <Button onClick={handleAddDependency}>
+                  {t("extension.config.addDependency")}
+                </Button>
+              </div>
+              <div className="flex flex-col gap-2">
+                {dependencies.map((dep, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center justify-between gap-2 rounded-md border p-2"
+                  >
+                    <span>{dep}</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemoveDependency(index)}
+                    >
+                      {t("extension.config.removeDependency")}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Bindings bindings={bindings} onUpdateBindings={handleUpdateBindings} />
     </div>
   )
 }
